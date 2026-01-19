@@ -199,7 +199,8 @@ function saveSession(sessionData) {
     sessionData.start,
     sessionData.end,
     sessionData.type,
-    sessionData.group || ""
+    sessionData.group || "",
+    sessionData.notes || ""
   ];
 
   // UPGRADE: Upsert Logic (Buscar si ya existe para actualizar)
@@ -221,7 +222,7 @@ function saveSession(sessionData) {
 
   if (rowIndexToUpdate > 0) {
     // Actualizar existente
-    sheet.getRange(rowIndexToUpdate, 1, 1, 6).setValues([valuesToSave]);
+    sheet.getRange(rowIndexToUpdate, 1, 1, 7).setValues([valuesToSave]);
     auditAction = "ACTUALIZAR";
   } else {
     // Insertar nuevo (Append)
@@ -229,7 +230,7 @@ function saveSession(sessionData) {
     if (lastRow === 2) {
       const firstCellVal = sheet.getRange(2, 1).getValue();
       if (!firstCellVal || firstCellVal === "") {
-        sheet.getRange(2, 1, 1, 6).setValues([valuesToSave]);
+        sheet.getRange(2, 1, 1, 7).setValues([valuesToSave]);
         // Log audit for initial insert too
         logAudit(userEmail, sessionData.email, "CREAR", sessionData);
         return { success: true };
@@ -460,7 +461,8 @@ function getTeacherRecords(ss, email) {
       start: formatTime(row[2]),
       end: formatTime(row[3]),
       type: row[4],
-      group: row[5]
+      group: row[5],
+      notes: row[6] || ""
     }));
 }
 
@@ -522,6 +524,7 @@ function getAllNonTeachingRecords(ss) {
       start: formatTime(row[2]),
       end: formatTime(row[3]),
       type: row[4],
-      group: row[5]
+      group: row[5],
+      notes: row[6] || ""
     }));
 }

@@ -412,7 +412,7 @@
                 baseClasses = "bg-[#e6cff2] text-slate-700 border border-slate-300";
             }
 
-            el.className = `cursor-pointer h-full w-full rounded-md p-2 text-xs transition-transform hover:scale-[1.02] active:scale-95 shadow-sm ${baseClasses}`;
+            el.className = `cursor-pointer h-full w-full rounded-md p-2 text-xs transition-transform hover:scale-[1.02] active:scale-95 shadow-sm ${baseClasses} relative group/card`;
 
             // Formateo Texto
             let titleText = myRecord.type;
@@ -432,9 +432,28 @@
                 subtitleHtml = myRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${myRecord.group}</div>` : '';
             }
 
+            // INFO ICON & TOOLTIP
+            let infoIconHtml = "";
+            if (myRecord.notes) {
+                // Escape HTML simple for notes to avoid breaking layout
+                const safeNotes = myRecord.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                infoIconHtml = `
+                    <div class="absolute top-1 right-1 group z-10">
+                         <div class="bg-white/50 hover:bg-white rounded-full p-0.5 transition-colors cursor-help">
+                            <i class="ph-fill ph-info text-blue-600 text-[12px]"></i>
+                         </div>
+                         <!-- Tooltip -->
+                         <div class="invisible group-hover:visible absolute right-0 top-5 w-48 bg-slate-800/95 backdrop-blur-sm text-white text-[10px] p-2.5 rounded-lg shadow-xl z-50 pointer-events-none break-words leading-relaxed border border-slate-700">
+                            ${safeNotes}
+                         </div>
+                    </div>
+                `;
+            }
+
             el.innerHTML = `
-                    <div class="font-bold truncate">${titleText}</div>
+                    <div class="font-bold truncate pr-4">${titleText}</div>
                     ${subtitleHtml}
+                    ${infoIconHtml}
                     `;
             el.onclick = () => openEditor(day, start, end, myRecord);
             td.appendChild(el);
@@ -481,7 +500,12 @@
             if (existingRecord.group) {
                 document.getElementById('input-group').value = existingRecord.group;
             }
+            // Populate Notes
+            document.getElementById('input-notes').value = existingRecord.notes || "";
         }
+
+        // Init Clear Button State
+        toggleClearButton();
 
         // Show
         document.getElementById('modal-editor').classList.remove('hidden');
@@ -498,11 +522,12 @@
         // Conditions
         const isTutoria = typeStr.toLowerCase().includes('tutoría');
         const needsGroup = isTutoria && !groupStr;
+        const missingType = !typeStr;
 
-        if (needsGroup) {
+        if (needsGroup || missingType) {
             btnSave.disabled = true;
             btnSave.classList.add('opacity-50', 'cursor-not-allowed');
-            btnSave.title = "Selecciona un grupo para la tutoría";
+            btnSave.title = missingType ? "Selecciona un tipo de actividad" : "Selecciona un grupo para la tutoría";
         } else {
             btnSave.disabled = false;
             btnSave.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -513,6 +538,49 @@
     // Validation Listeners
     document.getElementById('input-type').addEventListener('change', validateModal);
     document.getElementById('input-group').addEventListener('change', validateModal);
+
+    // --- Notes Clear Logic (Moved Functionality to Helper or Global Scope safe area) ---
+
+    function toggleClearButton() {
+        const inputNotes = document.getElementById('input-notes');
+        const btnClearNotes = document.getElementById('btn-clear-notes');
+
+        if (!inputNotes) {
+            console.warn("Input Notes element missing!");
+        }
+        if (!btnClearNotes) {
+            console.warn("Btn Clear Notes element missing!");
+        }
+
+        if (!inputNotes || !btnClearNotes) return;
+
+        const hasText = inputNotes.value.trim().length > 0;
+        // console.log("Toggle Clear Button:", hasText);
+
+        if (hasText) {
+            btnClearNotes.classList.remove('hidden');
+        } else {
+            btnClearNotes.classList.add('hidden');
+        }
+    }
+
+    // Expose to window to ensure HTML onclick works and debugging
+    window.clearNotes = function () {
+        const inputNotes = document.getElementById('input-notes');
+        if (!inputNotes) return;
+
+        inputNotes.value = '';
+        toggleClearButton();
+        inputNotes.focus();
+    };
+
+    // Attach listener safely
+    (function () {
+        const inputNotes = document.getElementById('input-notes');
+        if (inputNotes) {
+            inputNotes.addEventListener('input', toggleClearButton);
+        }
+    })();
 
     function closeModal() {
         document.getElementById('modal-editor').classList.add('hidden');
@@ -594,6 +662,7 @@
             end: formData.get('end'),
             type: formData.get('type'),
             group: formData.get('group'),
+            notes: formData.get('notes'), // Collect Notes
             email: AppState.user.email
         };
 
@@ -1040,18 +1109,31 @@
                         }
 
                         // Name (First word + Initial?) -> Simple: Full Name truncate
-                        const name = getName(rec.email).split(' ')[0]; // Just First Name for compactness? Or Full.
-                        // Let's try Full, truncate handles it. I'll revert to full name logic used before if preferred, 
-                        // but splitting by space [0] matches the previous 'split' logic in the context block I read?
-                        // Wait, previous code was: const name = getName(rec.email).split(' ')[0]; 
-                        // Actually in the view_file output it was: const name = getName(rec.email).split(' ')[0];
+                        const name = getName(rec.email).split(' ')[0];
 
-                        pill.innerHTML = `<span class="opacity-70 font-bold min-w-[10px]">${shortType}</span> <span>${getName(rec.email)}</span> ${extraContent}`;
+                        // Info Icon logic
+                        let infoIconHtml = "";
+                        if (rec.notes) {
+                            const safeNotes = rec.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            // Use onmouseenter/leave for Global Tooltip
+                            // We need to pass the notes carefully. 
+                            // Since safeNotes is string, we can put it in function call or data attribute.
+                            // data-tooltip attribute is cleaner.
+                            infoIconHtml = `
+                                <div class="ml-auto pl-1 cursor-help opacity-70 hover:opacity-100 flex items-center" 
+                                     onmouseenter="Tooltip.show('${safeNotes}', this)" 
+                                     onmouseleave="Tooltip.hide()">
+                                    <i class="ph-fill ph-info text-[10px]"></i>
+                                </div>
+                            `;
+                        }
+
+                        pill.innerHTML = `<span class="opacity-70 font-bold min-w-[10px]">${shortType}</span> <span>${getName(rec.email)}</span> ${extraContent} ${infoIconHtml}`;
 
                         container.appendChild(pill);
                     });
 
-                    td.appendChild(container);
+                    td.appendChild(container); // Append container to TD
                 }
 
                 tr.appendChild(td);
@@ -1083,6 +1165,39 @@
         const overlay = document.getElementById('loading-overlay-global');
         if (overlay) overlay.classList.add('hidden');
     }
+
+    // --- GLOBAL TOOLTIP HELPER ---
+    const Tooltip = {
+        show(text, target) {
+            const el = document.getElementById('global-tooltip');
+            if (!el) return;
+
+            // Simple sanitization or trust text (internal app)
+            el.innerHTML = text;
+            el.classList.remove('hidden');
+
+            // Positioning
+            const rect = target.getBoundingClientRect();
+            // Default: Top Center relative to target
+            // We need to account for scroll offset if not fixed? 
+            // Element is Fixed, so we use rect (viewport relative).
+
+            let top = rect.top - el.offsetHeight - 8;
+            let left = rect.left + (rect.width / 2) - (el.offsetWidth / 2);
+
+            // Boundary checks
+            if (top < 10) top = rect.bottom + 8; // Flip to bottom if too high
+            if (left < 10) left = 10;
+            if (left + el.offsetWidth > window.innerWidth - 10) left = window.innerWidth - el.offsetWidth - 10;
+
+            el.style.top = `${top}px`;
+            el.style.left = `${left}px`;
+        },
+        hide() {
+            const el = document.getElementById('global-tooltip');
+            if (el) el.classList.add('hidden');
+        }
+    };
 
     // --- NAVIGATION & OPTIMIZATION ---
 
