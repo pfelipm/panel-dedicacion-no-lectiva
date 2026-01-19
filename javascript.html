@@ -1,0 +1,1145 @@
+<script>
+    /**
+     * FRONTEND - GESTIÓN DEDICACIÓN NO LECTIVA
+     * Lógica de cliente para interactividad y gestión de estado.
+     */
+
+    // Estado Global de la Aplicación
+    const AppState = {
+        user: null,
+        config: null,
+        schedule: [],      // Slots estructurales
+        myRecords: [],     // Mis sesiones no lectivas
+        myClasses: [],     // Mis clases lectivas
+        teachersList: [],  // Admin Only
+        currentUser: null, // Logged in user (for Admin context)
+
+        // Helpers de cálculo
+        getTargets() {
+            return this.user?.profile?.metas || {};
+        }
+    };
+
+    // --- INICIALIZACIÓN ---
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadInitialData();
+    });
+
+    function loadInitialData() {
+        google.script.run
+            .withSuccessHandler(initApp)
+            .withFailureHandler(showError)
+            .getInitialData();
+    }
+
+    function initApp(data) {
+        console.log("Datos recibidos:", data);
+
+        AppState.user = data.user;
+        AppState.config = data.config;
+        AppState.schedule = data.schedule;
+        AppState.myRecords = data.myRecords;
+        AppState.myClasses = data.myClasses;
+        AppState.myClasses = data.myClasses;
+        AppState.teachersList = data.teachersList || [];
+        AppState.allRecords = data.allRecords || [];
+
+        if (!AppState.currentUser) {
+            AppState.currentUser = {
+                email: data.user.email,
+                isAdmin: data.user.isAdmin,
+                isReader: data.user.isReader
+            };
+        }
+
+        // Renderizar UI base
+        renderUserInfo();
+        renderNavigation();
+        renderDropdowns();
+
+
+        // Renderizar Vistas
+        renderScheduleGrid();
+        updateStats();
+
+        // Ocultar loading
+        document.getElementById('loading').classList.add('fade-out'); // Add transition class
+        setTimeout(() => document.getElementById('loading').remove(), 500);
+
+        // Logic: Pure Reader -> Force Dashboard
+        if (AppState.currentUser.isReader && !AppState.currentUser.isAdmin && !data.user.profile) {
+            console.log("Pure Reader detected: switching to Dashboard...");
+            renderNavigation(); // Ensure links are hidden
+            navigate('dashboard');
+            return;
+        }
+
+        // UX Pure Admin Check: If admin has no profile (non-teaching), auto-select first teacher
+        if (AppState.currentUser.isAdmin && !data.user.profile && AppState.teachersList.length > 0) {
+            console.log("Pure Admin detected: switching to first teacher view...");
+            switchTeacher(AppState.teachersList[0].email);
+            // navigate('dashboard'); // Alternatively go to dashboard
+            // But user asked to "preselect", so let's load schedule.
+        }
+    }
+
+    function showError(err) {
+        // Remove loading
+        const loading = document.getElementById('loading');
+        if (loading) loading.remove();
+
+        // Show Full Screen Error
+        const main = document.querySelector('main');
+        main.innerHTML = `
+            <div class="flex-1 flex items-center justify-center bg-slate-50 p-6">
+                <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-red-100 text-center">
+                    <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <i class="ph ph-warning-circle text-3xl"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-slate-800 mb-2">Acceso Denegado</h2>
+                    <p class="text-slate-500 mb-6 text-sm leading-relaxed">${err.message}</p>
+                    ${err.message.includes('registrado') ? `
+                        <div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            Si crees que esto es un error, contacta con Jefatura de Estudios para que te den de alta en la plataforma.
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+
+    // --- RENDERIZADO UI ---
+
+    function renderUserInfo() {
+        const profile = AppState.user.profile;
+        const container = document.getElementById('user-info');
+        let html = '';
+
+        // Case 1: Admin
+        if (AppState.currentUser.isAdmin) {
+            html = `
+                <div class="flex items-center gap-3">
+                     <div class="hidden md:flex flex-col items-end">
+                        <span class="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider mb-0.5">Admin</span>
+                        <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                    </div>
+                    
+                    <!-- Teacher Selector -->
+                    <select id="admin-teacher-selector" onchange="switchTeacher(this.value)" class="text-xs border border-slate-200 rounded-lg p-1.5 bg-slate-50 text-slate-700 focus:ring-2 focus:ring-purple-500 outline-none w-48 transition-opacity">
+                        <option value="${AppState.currentUser.email}" ${AppState.user.email === AppState.currentUser.email ? 'selected' : ''}>${profile ? 'Mi horario' : '-- Seleccionar docente --'}</option>
+                        <option disabled>──────────</option>
+                        ${AppState.teachersList.map(t => `<option value="${t.email}" ${AppState.user.email === t.email ? 'selected' : ''}>${t.name}</option>`).join('')}
+                    </select>
+                    
+                    <!-- Avatar (User viewed) - Solo mostrar si HAY perfil seleccionado -->
+                    ${AppState.user.profile ? `
+                    <div class="h-8 w-8 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center font-bold text-xs border border-purple-200" title="${AppState.user.profile.name}">
+                       ${AppState.user.profile.code}
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        // Case 2: Reader
+        else if (AppState.currentUser.isReader) {
+            html = `
+                <div class="flex items-center gap-3">
+                     <div class="hidden md:flex flex-col items-end">
+                        <span class="bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider mb-0.5">Lector</span>
+                        <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                    </div>
+                     <div class="h-8 w-8 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs border border-orange-200">
+                       <i class="ph-fill ph-eye"></i>
+                    </div>
+                </div>
+            `;
+        }
+        // Case 3: Regular Teacher
+        else if (profile) {
+            html = `
+                <div class="flex flex-col items-end mr-2">
+                    <span class="font-medium text-slate-700 leading-tight">${profile.name}</span>
+                    <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                </div>
+                <div class="h-8 w-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-xs" title="${profile.code}">
+                  ${profile.code}
+                </div>
+            `;
+        }
+
+        if (html) {
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+        } else {
+            container.innerHTML = '';
+            container.classList.add('hidden');
+        }
+    }
+
+    function switchTeacher(email) {
+        if (!email) return;
+
+        showLoading("Cargando horario...");
+
+        google.script.run
+            .withSuccessHandler((data) => {
+                // Update AppState partly
+                AppState.user = data.user;
+                AppState.myRecords = data.myRecords;
+                AppState.myClasses = data.myClasses;
+
+                // Keep Admin privileges in UI logic by using currentUser
+                // Re-render
+                renderUserInfo();
+                renderScheduleGrid();
+                updateStats();
+
+                hideLoading();
+            })
+            .withFailureHandler((err) => {
+                hideLoading();
+                showError(err);
+            })
+            .getTeacherData(email);
+    }
+
+    function renderNavigation() {
+        // Menu Admin
+        if (AppState.currentUser && AppState.currentUser.isAdmin) {
+            document.getElementById('admin-menu').classList.remove('hidden');
+        }
+
+        // Hide "Mi Horario" for Pure Readers or Pure Admins
+        const isTeacher = !!AppState.currentUser.profile;
+        const navSchedule = document.querySelector('[onclick="navigate(\'schedule\')"]');
+
+        if (!isTeacher) {
+            if (navSchedule) navSchedule.classList.add('hidden');
+        } else {
+            if (navSchedule) navSchedule.classList.remove('hidden');
+        }
+    }
+
+    function renderDropdowns() {
+        const typeSelect = document.getElementById('input-type');
+        const groupSelect = document.getElementById('input-group');
+
+        // Limpiar
+        typeSelect.innerHTML = '<option value="">-- Seleccionar --</option>';
+        groupSelect.innerHTML = '<option value="">-- Seleccionar --</option>';
+
+        // Llenar Tipos
+        AppState.config.sessionTypes.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            typeSelect.appendChild(opt);
+        });
+
+        // Llenar Grupos
+        AppState.config.groups.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g;
+            opt.textContent = g;
+            groupSelect.appendChild(opt);
+        });
+
+        // Listener para mostrar campo grupo si es Tutoría
+        // Listener para mostrar campo grupo si es Tutoría y filtrar opciones
+        typeSelect.addEventListener('change', (e) => {
+            const isTutoria = e.target.value.toLowerCase().includes('tutoría');
+            const groupSelect = document.getElementById('input-group');
+            const groupContainer = document.getElementById('group-container');
+
+            // Resetear opciones primero
+            groupSelect.innerHTML = '<option value="">-- Seleccionar --</option>';
+
+            if (isTutoria) {
+                groupContainer.classList.remove('hidden');
+
+                // Obtener grupos permitidos del perfil del docente (separados por coma/espacio)
+                let allowedGroups = [];
+                const rawGroups = AppState.user.profile.metas.tutoria;
+                if (rawGroups) {
+                    // Split por comas, espacios, puntos y comas
+                    allowedGroups = String(rawGroups).split(/[\s,;]+/).filter(Boolean); // Remove empty
+                }
+
+                // Filtrar: solo mostrar grupos que estén en allowedGroups
+                // Si allowedGroups está vacío, ¿quizás permitir todos? No, el usuario dijo "solo aparecieran...". Si no hay, no aparece nada.
+                if (allowedGroups.length > 0) {
+                    allowedGroups.forEach(g => {
+                        const opt = document.createElement('option');
+                        opt.value = g;
+                        opt.textContent = g;
+                        groupSelect.appendChild(opt);
+                    });
+                } else {
+                    // Fallback si no tiene grupos asignados: ¿Mostrar todos o aviso? Dejamos vacío según requerimiento estricto.
+                    // (Opcional: añadir opción disabled "No tienes grupos de tutoría asignados")
+                    const opt = document.createElement('option');
+                    opt.textContent = "(Sin grupos asignados)";
+                    opt.disabled = true;
+                    groupSelect.appendChild(opt);
+                }
+
+            } else {
+                groupContainer.classList.add('hidden');
+                groupSelect.value = "";
+
+                // Restaurar TODOS los grupos si no es tutoría (aunque este campo se oculta, mejor tenerlo listo por si cambia logica)
+                AppState.config.groups.forEach(g => {
+                    const opt = document.createElement('option');
+                    opt.value = g;
+                    opt.textContent = g;
+                    groupSelect.appendChild(opt);
+                });
+            }
+        });
+    }
+
+    function renderScheduleGrid() {
+        const tbody = document.getElementById('schedule-body');
+        tbody.innerHTML = '';
+
+        const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+
+        // 1. Obtener lista única de slots temporales (Hora inicio - fin)
+        // El backend ya nos da 'schedule' ordenado, pero puede haber duplicados de hora si hay múltiples filas
+        // Convertimos a un mapa único por tiempo start-end para pintar las filas
+        const uniqueTimeSlots = [];
+        const seenTimes = new Set();
+
+        AppState.schedule.forEach(slot => {
+            const key = `${slot.start} -${slot.end} `;
+            if (!seenTimes.has(key)) {
+                seenTimes.add(key);
+                uniqueTimeSlots.push({ start: slot.start, end: slot.end, type: slot.type });
+            }
+        });
+
+        // 2. Pintar Filas
+        uniqueTimeSlots.forEach(slot => {
+            const tr = document.createElement('tr');
+            tr.className = "border-b border-slate-100 hover:bg-slate-50 transition-colors";
+
+            // Columna Hora
+            const tdTime = document.createElement('td');
+            tdTime.className = "py-3 px-4 text-xs font-medium text-slate-500 whitespace-nowrap";
+            tdTime.innerHTML = `${slot.start} <br><span class="text-slate-400 font-normal">${slot.end}</span>`;
+            tr.appendChild(tdTime);
+
+            // Columnas Días
+            days.forEach(day => {
+                const td = document.createElement('td');
+                td.className = "py-2 px-2 border-l border-slate-100 relative h-16 align-top";
+
+                // Verificar Tipo de Slot (Lectivo vs Descanso)
+                // Buscamos si para este 'day' y este rango horario, el slot es BREAK en el backend
+                // (Nota simplificada: En backend sacamos unique slots, aquí asumimos estructura regular)
+                // Verificamos "Clases Lectivas" asignadas al usuario
+                const myClass = AppState.myClasses.find(c =>
+                    c.day === day && c.start === slot.start
+                );
+
+                if (myClass) {
+                    // -- CLASE LECTIVA --
+                    renderClassCell(td, myClass);
+                } else {
+                    // Verificar si es un descanso (Break)
+                    // Esto requiere mirar el slot específico para este día en la data original completa (schedule)
+                    const scheduleItem = AppState.schedule.find(s => s.day === day && s.start === slot.start);
+                    const isBreak = scheduleItem ? scheduleItem.type === 'BREAK' : false; // Default false
+
+                    if (isBreak) {
+                        // -- DESCANSO -- 
+                        td.className += " bg-slate-100/50"; // Gris sutil
+                        const span = document.createElement('span');
+                        span.className = "text-[10px] text-slate-400 font-medium uppercase tracking-wider block text-center mt-2";
+                        span.textContent = "Descanso";
+                        td.appendChild(span);
+                    } else {
+                        // -- SLOT LIBRE (Interactivo) --
+                        renderInteractiveCell(td, day, slot.start, slot.end);
+                    }
+                }
+
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderClassCell(td, classData) {
+        td.className += " bg-blue-50/50";
+        td.innerHTML = `
+                    <div class="h-full w-full rounded-md border border-blue-100 bg-blue-100 p-2 text-xs flex flex-col justify-center">
+                        <div class="font-bold text-blue-700">${classData.group}</div>
+                        <div class="text-blue-600 truncate">${classData.module || '--'}</div>
+                        <div class="mt-1 text-[10px] text-blue-500 flex items-center gap-1">
+                            <i class="ph-fill ph-chalkboard-teacher"></i> ${classData.classroom || 'Aula ?'}
+                        </div>
+                    </div>
+                    `;
+    }
+
+    function renderInteractiveCell(td, day, start, end) {
+        // Buscar si ya tengo sesión NO LECTIVA grabada aquí
+        const myRecord = AppState.myRecords.find(r =>
+            r.day === day && r.start === start
+        );
+
+        if (myRecord) {
+            // -- SESIÓN NO LECTIVA EXISTENTE --
+            const el = document.createElement('div');
+
+            // Colores: Fondo común #e6cff2 para todas
+            let baseClasses = "bg-[#e6cff2] text-slate-700 border";
+
+            // Bordes gruesos según tipo (Mismo color que tarjetas superiores)
+            if (myRecord.type.toLowerCase().includes('guardia')) {
+                baseClasses += " border-l-[6px] border-orange-500 border-t border-b border-r border-slate-200/50";
+                // Guardias Orange
+                baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-orange-500 shadow-sm";
+            } else if (myRecord.type.toLowerCase().includes('tutoría')) {
+                // Tutorías Emerald
+                baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-emerald-600 shadow-sm";
+            } else {
+                // Otras (Gestión, etc) - Solo fondo
+                baseClasses = "bg-[#e6cff2] text-slate-700 border border-slate-300";
+            }
+
+            el.className = `cursor-pointer h-full w-full rounded-md p-2 text-xs transition-transform hover:scale-[1.02] active:scale-95 shadow-sm ${baseClasses}`;
+
+            // Formateo Texto
+            let titleText = myRecord.type;
+            let subtitleHtml = "";
+
+            if (myRecord.type.toLowerCase().includes('tutoría') && myRecord.group) {
+                // "Tutoría [Grupo]" 
+                // Asumimos que myRecord.type ya dice "Tutoría". Si es "Tutoría EE1" (del select) ya está bien.
+                // Pero si el select dice solo "Tutoría" y el grupo va aparte.
+                // El select values son "Tutoría", "Guardia", etc.
+                // El usuario quiere: "Titoría" + espacio + código de grupo
+                // Corrección: "Titoría" -> "Tutoría" (typo usuario?) asumo Tutoría.
+                titleText = `Tutoría ${myRecord.group}`;
+                // Subtítulo eliminado
+            } else {
+                // Otras: Título normal, subtítulo grupo si existe
+                subtitleHtml = myRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${myRecord.group}</div>` : '';
+            }
+
+            el.innerHTML = `
+                    <div class="font-bold truncate">${titleText}</div>
+                    ${subtitleHtml}
+                    `;
+            el.onclick = () => openEditor(day, start, end, myRecord);
+            td.appendChild(el);
+
+        } else {
+            // -- VACÍO (Click para crear) --
+            const btn = document.createElement('button');
+            btn.className = "w-full h-full rounded-md border border-slate-200 border-dashed text-slate-300 hover:text-blue-500 hover:border-blue-300 hover:bg-blue-50/30 transition-all flex items-center justify-center group";
+            btn.innerHTML = `<i class="ph ph-plus text-xl opacity-0 group-hover:opacity-100"></i>`;
+            btn.onclick = () => openEditor(day, start, end, null);
+            td.appendChild(btn);
+        }
+    }
+
+
+    // --- GESTIÓN DE MODALES Y EDICIÓN ---
+
+    let currentEditing = null; // {day, start, end, record ? }
+
+    function openEditor(day, start, end, existingRecord) {
+        currentEditing = { day, start, end };
+
+        // Título
+        document.getElementById('modal-title').textContent = existingRecord
+            ? `Editar sesión - ${day} ${start}`
+            : `Nueva sesión - ${day} ${start}`;
+
+        // Reset form
+        document.getElementById('session-form').reset();
+        document.getElementById('group-container').classList.add('hidden');
+        document.getElementById('btn-delete').classList.toggle('hidden', !existingRecord);
+
+        // Hidden inputs
+        document.getElementById('input-day').value = day;
+        document.getElementById('input-start').value = start;
+        document.getElementById('input-end').value = end;
+
+        // Fill data if exists
+        if (existingRecord) {
+            const typeSelect = document.getElementById('input-type');
+            typeSelect.value = existingRecord.type;
+            typeSelect.dispatchEvent(new Event('change')); // Trigger group visibility
+
+            if (existingRecord.group) {
+                document.getElementById('input-group').value = existingRecord.group;
+            }
+        }
+
+        // Show
+        document.getElementById('modal-editor').classList.remove('hidden');
+
+        // Initial Validation Check
+        validateModal();
+    }
+
+    function validateModal() {
+        const typeStr = document.getElementById('input-type').value || "";
+        const groupStr = document.getElementById('input-group').value || "";
+        const btnSave = document.querySelector('#session-form button[type="submit"]');
+
+        // Conditions
+        const isTutoria = typeStr.toLowerCase().includes('tutoría');
+        const needsGroup = isTutoria && !groupStr;
+
+        if (needsGroup) {
+            btnSave.disabled = true;
+            btnSave.classList.add('opacity-50', 'cursor-not-allowed');
+            btnSave.title = "Selecciona un grupo para la tutoría";
+        } else {
+            btnSave.disabled = false;
+            btnSave.classList.remove('opacity-50', 'cursor-not-allowed');
+            btnSave.title = "";
+        }
+    }
+
+    // Validation Listeners
+    document.getElementById('input-type').addEventListener('change', validateModal);
+    document.getElementById('input-group').addEventListener('change', validateModal);
+
+    function closeModal() {
+        document.getElementById('modal-editor').classList.add('hidden');
+        currentEditing = null;
+    }
+
+    // Listener ELIMINAR
+    // Listener ELIMINAR (Abre Modal Prompt)
+    document.getElementById('btn-delete').addEventListener('click', () => {
+        if (!currentEditing) return;
+        // Mostrar Modal Confirm
+        document.getElementById('modal-confirm').classList.remove('hidden');
+    });
+
+    // Listener Confirmación OK
+    document.getElementById('btn-confirm-ok').addEventListener('click', () => {
+        // Cerrar modal confirm
+        document.getElementById('modal-confirm').classList.add('hidden');
+        performDelete();
+    });
+
+    // Listener Confirmación Cancel
+    document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
+        document.getElementById('modal-confirm').classList.add('hidden');
+    });
+
+    function showCrudToast(text) {
+        const toast = document.getElementById('crud-toast');
+        toast.querySelector('span').textContent = text;
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        setTimeout(() => {
+            toast.classList.add('translate-y-20', 'opacity-0');
+        }, 3000); // Hide after 3s approx
+    }
+
+
+    function performDelete() {
+        if (!currentEditing) return;
+
+        // Optimistic Delete
+        const data = {
+            day: currentEditing.day,
+            start: currentEditing.start,
+            end: currentEditing.end,
+            email: AppState.user.email
+        };
+
+        AppState.myRecords = AppState.myRecords.filter(r =>
+            !(r.day === data.day && r.start === data.start)
+        );
+
+        renderScheduleGrid();
+        updateStats();
+        closeModal();
+
+        showCrudToast("Eliminando sesión...");
+
+        google.script.run
+            .withSuccessHandler((res) => {
+                console.log("Eliminado OK");
+                AppState.isDirty = true; // Optimization
+            })
+            .withFailureHandler((err) => {
+                alert("Error al eliminar: " + err.message);
+                loadInitialData(); // Rollback
+            })
+            .deleteSession(data);
+    }
+
+    // Interceptar submit
+    document.getElementById('session-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!currentEditing) return;
+
+        const formData = new FormData(e.target);
+        const data = {
+            day: formData.get('day'),
+            start: formData.get('start'),
+            end: formData.get('end'),
+            type: formData.get('type'),
+            group: formData.get('group'),
+            email: AppState.user.email
+        };
+
+        // Validación Frontend Rápida
+        // Validación Frontend: El botón ya debería estar disabled si falta algo,
+        // pero doble check por seguridad (sin alert feo, solo return)
+        if (!data.type) return;
+        if (data.type.toLowerCase().includes('tutoría') && !data.group) return;
+
+
+        saveData(data);
+    });
+
+
+    function saveData(data) {
+        // Optimistic UI: Actualizar localmente antes de backend
+        // 1. Quitar registro previo en ese slot si existe
+        AppState.myRecords = AppState.myRecords.filter(r =>
+            !(r.day === data.day && r.start === data.start)
+        );
+        // 2. Añadir nuevo
+        AppState.myRecords.push(data);
+
+        // Repintar
+        renderScheduleGrid();
+        updateStats();
+        closeModal();
+
+        // Enviar a backend
+        showCrudToast("Guardando cambios...");
+
+        google.script.run
+            .withSuccessHandler((res) => {
+                console.log("Guardado OK");
+                AppState.isDirty = true; // Optimization
+            })
+            .withFailureHandler((err) => {
+                alert("Error al guardar: " + err.message);
+                // Rollback (Reload app simple)
+                loadInitialData();
+            })
+            .saveSession(data);
+    }
+
+
+    // --- ESTADÍSTICAS ---
+
+    function updateStats() {
+        if (!AppState.user.profile) return;
+
+        // Calcular totales
+        let guardiasCount = 0;
+        const tutoriasGroups = new Set(); // Grupos únicos cubiertos
+
+        AppState.myRecords.forEach(r => {
+            if (r.type.toLowerCase().includes('guardia')) guardiasCount++;
+            if (r.type.toLowerCase().includes('tutoría') && r.group) {
+                tutoriasGroups.add(r.group);
+            }
+        });
+
+        // Render Stats: Ahora contamos SESIONES (1 slot = 1 sesión)
+        const totalSessions = AppState.myRecords.length;
+
+
+        document.getElementById('stat-total').textContent = `${totalSessions}`; // Sin 'h' o con ' sesiones' si se prefiere, pero el usuario pidió entero
+        document.getElementById('stat-guardias').textContent = guardiasCount;
+
+        // Guardias Target
+        const guardiasMeta = Math.round(AppState.user.profile.metas.guardias || 0);
+
+        // Show Target + Badge if excess
+        // Show Target + Badge if excess
+        if (guardiasCount > guardiasMeta) {
+            const extra = guardiasCount - guardiasMeta;
+            // Badge inline, "Objetivo:" is already in HTML parent
+            document.getElementById('stat-guardias-target').innerHTML = `
+                    ${guardiasMeta}
+                    <span class="ml-1 text-[10px] bg-blue-50 text-blue-600 px-1.5 rounded border border-blue-100 font-semibold align-middle" title="${extra} sesión extra">+${extra}</span>
+                    `;
+        } else {
+            document.getElementById('stat-guardias-target').textContent = `${guardiasMeta}`;
+        }
+
+        // Clases Semanales
+        document.getElementById('stat-classes').textContent = AppState.myClasses.length;
+
+        // Validar Tutorías
+        const requiredTutoria = AppState.user.profile.metas.tutoria; // String o bool
+        const isRequired = requiredTutoria && requiredTutoria.toString().toLowerCase() !== 'no' && requiredTutoria !== '';
+
+        const tutElem = document.getElementById('stat-tutorias');
+        const tutTarget = document.getElementById('stat-tutorias-target');
+
+        // Iconos
+        const iconTotal = document.getElementById('icon-status-total');
+        const iconGuardias = document.getElementById('icon-status-guardias');
+        const iconTutorias = document.getElementById('icon-status-tutorias');
+
+        tutElem.textContent = tutoriasGroups.size;
+
+        if (isRequired) {
+            tutTarget.textContent = `Asignadas: ${Array.from(tutoriasGroups).join(', ')}`;
+            tutElem.className = tutoriasGroups.size > 0 ? "text-2xl font-bold text-emerald-600" : "text-2xl font-bold text-red-500";
+
+            // Validación Múltiples Tutorías (Aviso)
+            // Verificar si algún grupo tiene más de 1 sesión
+            const groupCounts = {};
+            let hasMultiple = false;
+            AppState.myRecords.forEach(r => {
+                if (r.type.toLowerCase().includes('tutoría') && r.group) {
+                    groupCounts[r.group] = (groupCounts[r.group] || 0) + 1;
+                    if (groupCounts[r.group] > 1) hasMultiple = true;
+                }
+            });
+
+            if (hasMultiple) {
+                // Fix Visual Glitch: Wrap in flex container to handle multiple items/wrapping
+                tutTarget.innerHTML = `
+                <div class="flex flex-wrap items-center gap-1">
+                    <span>Asignadas: ${Array.from(tutoriasGroups).join(', ')}</span>
+                    <span class="text-[10px] bg-red-100 text-red-600 px-1 rounded border border-red-200 whitespace-nowrap" title="Más de una sesión por grupo detectada">⚠ Múltiples</span>
+                </div>`;
+            }
+
+            // Icon Logic Tutorias
+            if (tutoriasGroups.size > 0) {
+                iconTutorias.className = "ph-fill ph-check-circle absolute top-4 right-4 text-xl text-emerald-500 transaction-colors duration-300";
+            } else {
+                iconTutorias.className = "ph-fill ph-warning absolute top-4 right-4 text-xl text-amber-500 transaction-colors duration-300";
+            }
+
+        } else {
+            tutTarget.textContent = "No requeridas";
+            tutElem.className = "text-2xl font-bold text-slate-400";
+            // Icon Logic Tutorias (Not Required) -> Hide or neutral
+            iconTutorias.className = "ph-fill ph-check-circle absolute top-4 right-4 text-xl text-slate-200 transaction-colors duration-300";
+        }
+
+        // Progress Bar & Meta Total
+        const metaStr = AppState.user.profile.metas.totalNonTeaching; // "X" o "X h"
+        // Parse & Round Target (Integer sessions always)
+        let metaVal = 0;
+        if (typeof metaStr === 'number') metaVal = metaStr;
+        else if (typeof metaStr === 'string') metaVal = parseFloat(metaStr) || 0;
+
+        const visualTarget = Math.round(metaVal);
+
+        // Show Target + Badge if excess
+        if (totalSessions > visualTarget) {
+            const extra = totalSessions - visualTarget;
+            // Badge inline, "Objetivo:" is already in HTML parent
+            document.getElementById('stat-meta').innerHTML = `
+                    ${visualTarget}
+                    <span class="ml-1 text-[10px] bg-blue-50 text-blue-600 px-1.5 rounded border border-blue-100 font-semibold align-middle" title="${extra} sesión extra">+${extra}</span>
+                    `;
+        } else {
+            document.getElementById('stat-meta').textContent = `${visualTarget}`;
+        }
+
+        // Restore/Ensure Progress Bar Calculation
+        const percentage = Math.min(100, (totalSessions / visualTarget) * 100);
+        const pBar = document.getElementById('progress-bar');
+        if (pBar) pBar.style.width = `${percentage}%`;
+
+
+
+        // Icon Logic Total Dedication (Strict Integer Comparison)
+        if (totalSessions >= visualTarget) {
+            iconTotal.className = "ph-fill ph-check-circle absolute top-4 right-4 text-xl text-emerald-500 transaction-colors duration-300";
+        } else {
+            iconTotal.className = "ph-fill ph-warning absolute top-4 right-4 text-xl text-amber-500 transaction-colors duration-300";
+        }
+
+        // Icon Logic Guardias
+        if (guardiasCount >= guardiasMeta) {
+            iconGuardias.className = "ph-fill ph-check-circle absolute top-4 right-4 text-xl text-emerald-500 transaction-colors duration-300";
+        } else {
+            iconGuardias.className = "ph-fill ph-warning absolute top-4 right-4 text-xl text-amber-500 transaction-colors duration-300";
+        }
+
+        // Badge General validation
+        // Consistent Logic: "Complete" if total >= rounded target AND guardias >= rounded target
+        const badge = document.getElementById('status-badge');
+
+        // Use visualTarget (Total) and guardiasMeta (Guardias) for consistency
+        if (totalSessions >= visualTarget && guardiasCount >= guardiasMeta) {
+            badge.textContent = "COMPLETO";
+            badge.className = "px-2 py-1 rounded-md bg-emerald-100 text-emerald-600 text-xs font-bold";
+        } else {
+            badge.textContent = "PENDIENTE";
+            badge.className = "px-2 py-1 rounded-md bg-orange-100 text-orange-600 text-xs font-bold";
+        }
+    }
+
+    // --- GESTIÓN GLOBAL DASHBOARD ---
+
+    // Filtros
+    const GlobalFilters = {
+        selectedTeachers: new Set(), // Emails
+        selectedTypes: new Set(['guardia', 'tutoria', 'gestion']), // Tipos activos
+        searchTerm: ""
+    };
+
+    function initGlobalView() {
+        // Inicializar Filtros: Todos los profes seleccionados por defecto
+        if (AppState.teachersList) {
+            AppState.teachersList.forEach(t => GlobalFilters.selectedTeachers.add(t.email));
+        }
+
+        // Renderizar Filtros
+        renderTeacherFilterList();
+        updateFilterBadges();
+
+        // Setup Search Listener
+        document.getElementById('teacher-search').addEventListener('input', (e) => {
+            GlobalFilters.searchTerm = e.target.value.toLowerCase();
+            renderTeacherFilterList();
+        });
+
+        // Initial Render
+        renderGlobalDashboard();
+    }
+
+    function toggleTeacherFilter() {
+        const dropdown = document.getElementById('dropdown-teachers');
+        dropdown.classList.toggle('hidden');
+    }
+
+    // Close dropdown on click outside
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('dropdown-teachers');
+        const button = document.getElementById('btn-filter-teachers');
+        if (!dropdown.classList.contains('hidden') && !dropdown.contains(e.target) && !button.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+
+    function renderTeacherFilterList() {
+        const container = document.getElementById('teacher-list-container');
+        container.innerHTML = '';
+
+        if (!AppState.teachersList) return;
+
+        AppState.teachersList.forEach(t => {
+            // Filter by search
+            if (GlobalFilters.searchTerm && !t.name.toLowerCase().includes(GlobalFilters.searchTerm)) {
+                return;
+            }
+
+            const div = document.createElement('label');
+            div.className = "flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded cursor-pointer";
+
+            const isChecked = GlobalFilters.selectedTeachers.has(t.email);
+
+            div.innerHTML = `
+                    <input type="checkbox" value="${t.email}" ${isChecked ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5">
+                        <span class="text-xs text-slate-700 truncate">${t.name}</span>
+                        `;
+
+            // Listener
+            div.querySelector('input').addEventListener('change', (e) => {
+                const email = e.target.value;
+                if (e.target.checked) GlobalFilters.selectedTeachers.add(email);
+                else GlobalFilters.selectedTeachers.delete(email);
+
+                updateFilterBadges();
+                renderGlobalDashboard();
+            });
+
+            container.appendChild(div);
+        });
+    }
+
+    function filterTeachers(action) {
+        if (action === 'all') {
+            AppState.teachersList.forEach(t => GlobalFilters.selectedTeachers.add(t.email));
+        } else if (action === 'none') {
+            GlobalFilters.selectedTeachers.clear();
+        } else if (action === 'invert') {
+            const newSet = new Set();
+            AppState.teachersList.forEach(t => {
+                if (!GlobalFilters.selectedTeachers.has(t.email)) newSet.add(t.email);
+            });
+            GlobalFilters.selectedTeachers = newSet;
+        }
+        renderTeacherFilterList();
+        updateFilterBadges();
+        renderGlobalDashboard();
+    }
+
+    function toggleTypeFilter(type) {
+        if (type === 'all') {
+            GlobalFilters.selectedTypes = new Set(['guardia', 'tutoria', 'gestion']);
+        } else {
+            // Exclusive: Select ONLY this type
+            GlobalFilters.selectedTypes.clear();
+            GlobalFilters.selectedTypes.add(type);
+        }
+        updateFilterBadges();
+        renderGlobalDashboard();
+    }
+
+    function updateFilterBadges() {
+        // Badge Docentes (Todo, Ninguno, o Número)
+        const badge = document.getElementById('filter-count-badge');
+        const total = AppState.teachersList ? AppState.teachersList.length : 0;
+        const selected = GlobalFilters.selectedTeachers.size;
+
+        if (selected === total) badge.textContent = "Todo";
+        else if (selected === 0) badge.textContent = "Ninguno";
+        else badge.textContent = `${selected}`;
+
+        // Activity Type Buttons Styling
+        const isAll = GlobalFilters.selectedTypes.size === 3;
+
+        const setStyle = (id, active, colorClass) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            // Reset
+            btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all shadow-sm border border-slate-100";
+
+            if (active) {
+                btn.className += ` ${colorClass} bg-white opacity-100 ring-1 ring-slate-200`;
+            } else {
+                btn.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all text-slate-500 hover:bg-slate-50 opacity-60";
+            }
+        };
+
+        // All Button
+        setStyle('btn-type-all', isAll, 'text-slate-700 font-bold bg-slate-50');
+
+        // Individual Buttons (Active only if NOT All mode, to emphasize exclusivity? Or just if selected?)
+        // User wants "exclusive". If I click Guardia, I want to see I am in Guardia mode. 
+        // If I am in All mode, seeing "Todas" active is enough.
+        // Let's highlight specific button only if that SPECIFIC mode is active (size===1 && has(type))
+        // OR just if it is in the set?
+        // If "Todas" is active, keeping others dimmed helps "Todas" stand out as the "Global" mode.
+        // If "Guardia" is active, highlighting it shows focus.
+
+        setStyle('btn-type-guardia', !isAll && GlobalFilters.selectedTypes.has('guardia'), 'text-orange-600 font-bold');
+        setStyle('btn-type-tutoria', !isAll && GlobalFilters.selectedTypes.has('tutoria'), 'text-emerald-600 font-bold');
+        setStyle('btn-type-gestion', !isAll && GlobalFilters.selectedTypes.has('gestion'), 'text-purple-600 font-bold');
+    }
+
+
+    function renderGlobalDashboard() {
+        const tbody = document.getElementById('global-schedule-body');
+        tbody.innerHTML = '';
+
+        if (!AppState.schedule || !AppState.allRecords) return;
+
+        // 1. Unificar Slots igual que en vista personal
+        const uniqueTimeSlots = [];
+        const seenTimes = new Set();
+        AppState.schedule.forEach(slot => {
+            const key = `${slot.start}-${slot.end}`;
+            if (!seenTimes.has(key)) {
+                seenTimes.add(key);
+                uniqueTimeSlots.push({ start: slot.start, end: slot.end }); // Ignore type logic here, focused on time grid
+            }
+        });
+
+        const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+
+        // 2. Pre-filtrar Records seleccionado
+        const visibleRecords = AppState.allRecords.filter(r => {
+            // Filter Email
+            if (!GlobalFilters.selectedTeachers.has(r.email)) return false;
+
+            // Filter Type
+            const tLower = r.type.toLowerCase();
+            let typeKey = 'gestion';
+            if (tLower.includes('guardia')) typeKey = 'guardia';
+            else if (tLower.includes('tutoría')) typeKey = 'tutoria';
+
+            if (!GlobalFilters.selectedTypes.has(typeKey)) return false;
+
+            return true;
+        });
+
+        // 3. Render Grid
+        uniqueTimeSlots.forEach((slot, index) => {
+            const tr = document.createElement('tr');
+            tr.className = "border-b border-slate-100 hover:bg-slate-50 transition-colors group";
+
+            // Hour Cell
+            const tdTime = document.createElement('td');
+            tdTime.className = "py-3 px-2 text-xs font-medium text-slate-500 whitespace-nowrap align-top border-r border-slate-100 bg-slate-50/50 sticky left-0";
+            tdTime.innerHTML = `<div>${slot.start}</div><div class="text-xs text-slate-400 font-normal">${slot.end}</div>`;
+            tr.appendChild(tdTime);
+
+            // Day Cells
+            days.forEach(day => {
+                const td = document.createElement('td');
+                td.className = "p-1 border-l border-slate-100 align-top relative h-20 min-h-[5rem]";
+
+                // Find records for this slot
+                const cellRecords = visibleRecords.filter(r =>
+                    r.day === day && r.start === slot.start
+                );
+
+                // Sort records: Guardias first? Or by name? By name is usually best for scanning.
+                // Let's sort by teacher email (or lookup name if possible, map is safer)
+                // Just sort by name logic if we had names easily attached. We have AppState.teachersList to lookup.
+
+                const getName = (email) => {
+                    const found = AppState.teachersList.find(t => t.email === email);
+                    return found ? found.name : email;
+                };
+
+                cellRecords.sort((a, b) => getName(a.email).localeCompare(getName(b.email)));
+
+                if (cellRecords.length > 0) {
+                    // Container for pills (Scrollable if many)
+                    const container = document.createElement('div');
+                    container.className = "flex flex-col gap-1 max-h-32 overflow-y-auto custom-scrollbar"; // Max height ~8 pills
+
+                    cellRecords.forEach(rec => {
+                        const pill = document.createElement('div');
+
+                        // Determine Style based on type
+                        let typeClass = "bg-purple-50 text-purple-700 border-purple-100"; // Default Gestión
+                        const tLower = rec.type.toLowerCase();
+                        if (tLower.includes('guardia')) typeClass = "bg-orange-50 text-orange-700 border-orange-100";
+                        if (tLower.includes('tutoría')) typeClass = "bg-emerald-50 text-emerald-700 border-emerald-100";
+
+                        pill.className = `text-[10px] px-1.5 py-0.5 rounded border ${typeClass} truncate font-medium flex items-center gap-1`;
+
+                        // Tooltip clean: Only show group if exists
+                        pill.title = `${getName(rec.email)} - ${rec.type}${rec.group ? ` (${rec.group})` : ''}`;
+
+                        // Content: Name - Type (Short)
+                        let shortType = rec.type;
+                        let extraContent = "";
+
+                        if (tLower.includes('guardia')) {
+                            shortType = "G";
+                        } else if (tLower.includes('tutoría')) {
+                            shortType = "T";
+                            if (rec.group) extraContent = `<div class="h-3 w-px bg-current opacity-40 mx-0.5"></div><span class="opacity-75 text-[9px]">${rec.group}</span>`;
+                        } else {
+                            shortType = "•";
+                        }
+
+                        // Name (First word + Initial?) -> Simple: Full Name truncate
+                        const name = getName(rec.email).split(' ')[0]; // Just First Name for compactness? Or Full.
+                        // Let's try Full, truncate handles it. I'll revert to full name logic used before if preferred, 
+                        // but splitting by space [0] matches the previous 'split' logic in the context block I read?
+                        // Wait, previous code was: const name = getName(rec.email).split(' ')[0]; 
+                        // Actually in the view_file output it was: const name = getName(rec.email).split(' ')[0];
+
+                        pill.innerHTML = `<span class="opacity-70 font-bold min-w-[10px]">${shortType}</span> <span>${getName(rec.email)}</span> ${extraContent}`;
+
+                        container.appendChild(pill);
+                    });
+
+                    td.appendChild(container);
+                }
+
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    // Navegación Básica
+    // --- UI HELPERS ---
+
+    function showLoading(msg = "Cargando datos...") {
+        let overlay = document.getElementById('loading-overlay-global');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'loading-overlay-global';
+            overlay.className = "fixed inset-0 bg-white/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm";
+            document.body.appendChild(overlay);
+        }
+        overlay.innerHTML = `
+                        <i class="ph ph-spinner animate-spin text-5xl text-purple-600 mb-2"></i>
+                        <span class="text-sm font-semibold text-slate-600">${msg}</span>
+                        `;
+        overlay.classList.remove('hidden');
+    }
+
+    function hideLoading() {
+        const overlay = document.getElementById('loading-overlay-global');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    // --- NAVIGATION & OPTIMIZATION ---
+
+    function navigate(viewId) {
+        // Toggle active class
+        document.querySelectorAll('.nav-item').forEach(el => {
+            el.classList.remove('active', 'bg-blue-50', 'text-blue-700');
+            el.classList.add('text-slate-600');
+            const onclickVal = el.getAttribute('onclick');
+            if (onclickVal && onclickVal.includes(viewId)) {
+                el.classList.add('active', 'bg-blue-50', 'text-blue-700');
+                el.classList.remove('text-slate-600');
+            }
+        });
+
+        // Toggle views
+        document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+        document.getElementById(`view-${viewId}`).classList.remove('hidden');
+
+        // UX Admin
+        const adminSelector = document.getElementById('admin-teacher-selector');
+        if (adminSelector) {
+            if (viewId === 'my-schedule') {
+                adminSelector.disabled = false;
+                adminSelector.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                adminSelector.disabled = true;
+                adminSelector.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // Init Dashboard on navigate if needed (or just once)
+        if (viewId === 'dashboard') {
+            if (GlobalFilters.selectedTeachers.size === 0 && AppState.teachersList) {
+                initGlobalView();
+            }
+            // Optimization: Only refresh if dirty or never loaded
+            if (AppState.isDirty || !AppState.allRecords) {
+                refreshGlobalData();
+            }
+        }
+    }
+
+    function refreshGlobalData() {
+        showLoading("Actualizando vista global...");
+
+        google.script.run
+            .withSuccessHandler((records) => {
+                AppState.allRecords = records;
+                renderGlobalDashboard();
+                AppState.isDirty = false; // Reset dirty flag
+                hideLoading();
+            })
+            .withFailureHandler((err) => {
+                hideLoading();
+                showError(err);
+            })
+            .getAllNonTeachingRecords();
+    }
+</script>
