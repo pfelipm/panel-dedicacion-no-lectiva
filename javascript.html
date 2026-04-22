@@ -13,6 +13,7 @@
         myClasses: [],     // Mis clases lectivas
         teachersList: [],  // Admin Only
         currentUser: null, // Logged in user (for Admin context)
+        lastUpdate: null,  // Info de Auditoría
 
         // Helpers de cálculo
         getTargets() {
@@ -36,22 +37,30 @@
     function initApp(data) {
         console.log("Datos recibidos:", data);
 
-        AppState.user = data.user;
-        AppState.config = data.config;
-        AppState.schedule = data.schedule;
-        AppState.myRecords = data.myRecords;
-        AppState.myClasses = data.myClasses;
-        AppState.myClasses = data.myClasses;
-        AppState.teachersList = data.teachersList || [];
-        AppState.allRecords = data.allRecords || [];
+        if (!data || !data.user) {
+            console.error("Error crítico: Datos de inicio incompletos", data);
+            showError({ message: "No se han podido cargar los datos de usuario. Por favor, recarga la página." });
+            return;
+        }
 
+        // Guardar privilegios del usuario REAL que abre la app (solo una vez)
         if (!AppState.currentUser) {
             AppState.currentUser = {
                 email: data.user.email,
-                isAdmin: data.user.isAdmin,
-                isReader: data.user.isReader
+                isAdmin: !!data.user.isAdmin,
+                isReader: !!data.user.isReader,
+                profile: data.user.profile || null
             };
         }
+
+        AppState.user = data.user;
+        AppState.config = data.config || { sessionTypes: [], groups: [] };
+        AppState.schedule = data.schedule || [];
+        AppState.myRecords = data.myRecords || [];
+        AppState.myClasses = data.myClasses || [];
+        AppState.teachersList = data.teachersList || [];
+        AppState.allRecords = data.allRecords || [];
+        AppState.lastUpdate = data.lastUpdate || null;
 
         // Renderizar UI base
         renderUserInfo();
@@ -62,15 +71,15 @@
         // Renderizar Vistas
         renderScheduleGrid();
         updateStats();
+        renderLastUpdate();
 
         // Ocultar loading
-        document.getElementById('loading').classList.add('fade-out'); // Add transition class
-        setTimeout(() => document.getElementById('loading').remove(), 500);
+        document.getElementById('loading')?.classList.add('fade-out');
+        setTimeout(() => document.getElementById('loading')?.remove(), 500);
 
         // Logic: Pure Reader -> Force Dashboard
         if (AppState.currentUser.isReader && !AppState.currentUser.isAdmin && !data.user.profile) {
             console.log("Pure Reader detected: switching to Dashboard...");
-            renderNavigation(); // Ensure links are hidden
             navigate('dashboard');
             return;
         }
@@ -79,46 +88,51 @@
         if (AppState.currentUser.isAdmin && !data.user.profile && AppState.teachersList.length > 0) {
             console.log("Pure Admin detected: switching to first teacher view...");
             switchTeacher(AppState.teachersList[0].email);
-            // navigate('dashboard'); // Alternatively go to dashboard
-            // But user asked to "preselect", so let's load schedule.
         }
     }
 
     function showError(err) {
+        console.error("Show Error:", err);
         // Remove loading
-        const loading = document.getElementById('loading');
-        if (loading) loading.remove();
+        document.getElementById('loading')?.remove();
 
         // Show Full Screen Error
         const main = document.querySelector('main');
-        main.innerHTML = `
-            <div class="flex-1 flex items-center justify-center bg-slate-50 p-6">
-                <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-red-100 text-center">
-                    <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <i class="ph ph-warning-circle text-3xl"></i>
-                    </div>
-                    <h2 class="text-xl font-bold text-slate-800 mb-2">Acceso Denegado</h2>
-                    <p class="text-slate-500 mb-6 text-sm leading-relaxed">${err.message}</p>
-                    ${err.message.includes('registrado') ? `
-                        <div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                            Si crees que esto es un error, contacta con Jefatura de Estudios para que te den de alta en la plataforma.
+        if (main) {
+            main.innerHTML = `
+                <div class="flex-1 flex items-center justify-center bg-slate-50 p-6">
+                    <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-red-100 text-center">
+                        <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <i class="ph ph-warning-circle text-3xl"></i>
                         </div>
-                    ` : ''}
+                        <h2 class="text-xl font-bold text-slate-800 mb-2">Acceso Denegado / Error</h2>
+                        <p class="text-slate-500 mb-6 text-sm leading-relaxed">${err.message || 'Error desconocido'}</p>
+                        ${err.message && err.message.includes('registrado') ? `
+                            <div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                Si crees que esto es un error, contacta con Jefatura de Estudios para que te den de alta en la plataforma.
+                            </div>
+                        ` : ''}
+                        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Reintentar</button>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else {
+            alert("Error crítico: " + (err.message || "Error desconocido"));
+        }
     }
 
 
     // --- RENDERIZADO UI ---
 
     function renderUserInfo() {
-        const profile = AppState.user.profile;
         const container = document.getElementById('user-info');
+        if (!container || !AppState.user) return;
+
+        const profile = AppState.user.profile;
         let html = '';
 
         // Case 1: Admin
-        if (AppState.currentUser.isAdmin) {
+        if (AppState.currentUser?.isAdmin) {
             html = `
                 <div class="flex items-center gap-3">
                      <div class="hidden md:flex flex-col items-end">
@@ -134,16 +148,16 @@
                     </select>
                     
                     <!-- Avatar (User viewed) - Solo mostrar si HAY perfil seleccionado -->
-                    ${AppState.user.profile ? `
-                    <div class="h-8 w-8 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center font-bold text-xs border border-purple-200" title="${AppState.user.profile.name}">
-                       ${AppState.user.profile.code}
+                    ${profile ? `
+                    <div class="h-8 w-8 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center font-bold text-xs border border-purple-200" title="${profile.name}">
+                       ${profile.code}
                     </div>
                     ` : ''}
                 </div>
             `;
         }
         // Case 2: Reader
-        else if (AppState.currentUser.isReader) {
+        else if (AppState.currentUser?.isReader) {
             html = `
                 <div class="flex items-center gap-3">
                      <div class="hidden md:flex flex-col items-end">
@@ -161,7 +175,7 @@
             html = `
                 <div class="flex flex-col items-end mr-2">
                     <span class="font-medium text-slate-700 leading-tight">${profile.name}</span>
-                    <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                    <span class="text-[10px] text-slate-400">${AppState.currentUser?.email || ''}</span>
                 </div>
                 <div class="h-8 w-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-xs" title="${profile.code}">
                   ${profile.code}
@@ -178,6 +192,39 @@
         }
     }
 
+    function renderLastUpdate() {
+        const container = document.getElementById('last-update-container');
+        if (!container) return;
+        
+        if (!AppState.lastUpdate) {
+            container.classList.add('hidden');
+            return;
+        }
+
+        try {
+            const date = new Date(AppState.lastUpdate.timestamp);
+            if (isNaN(date.getTime())) throw new Error("Fecha inválida");
+
+            const day = date.getDate().toString().padStart(2, '0');
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+
+            const dateStr = `${day}/${month}/${year} ${hours}:${minutes}`;
+            
+            // Usar email del usuario actual con seguridad
+            const currentUserEmail = AppState.user?.email || AppState.currentUser?.email;
+            const actor = AppState.lastUpdate.actor === currentUserEmail ? 'propio usuario' : AppState.lastUpdate.actor;
+
+            container.textContent = `Última mod: ${dateStr} por ${actor}`;
+            container.classList.remove('hidden');
+        } catch (e) {
+            console.error("Error al renderizar última actualización:", e);
+            container.classList.add('hidden');
+        }
+    }
+
     function switchTeacher(email) {
         if (!email) return;
 
@@ -185,16 +232,25 @@
 
         google.script.run
             .withSuccessHandler((data) => {
+                if (!data || !data.user) {
+                    console.error("Error al cambiar de docente: Datos incompletos", data);
+                    hideLoading();
+                    showError({ message: "No se han podido cargar los datos del docente seleccionado." });
+                    return;
+                }
+
                 // Update AppState partly
                 AppState.user = data.user;
-                AppState.myRecords = data.myRecords;
-                AppState.myClasses = data.myClasses;
+                AppState.myRecords = data.myRecords || [];
+                AppState.myClasses = data.myClasses || [];
+                AppState.lastUpdate = data.lastUpdate || null;
 
                 // Keep Admin privileges in UI logic by using currentUser
                 // Re-render
                 renderUserInfo();
                 renderScheduleGrid();
                 updateStats();
+                renderLastUpdate();
 
                 hideLoading();
             })
@@ -727,6 +783,10 @@
             .withSuccessHandler((res) => {
                 console.log("Eliminado OK");
                 AppState.isDirty = true; // Optimization
+                if (res.lastUpdate) {
+                    AppState.lastUpdate = res.lastUpdate;
+                    renderLastUpdate();
+                }
             })
             .withFailureHandler((err) => {
                 alert("Error al eliminar: " + err.message);
@@ -783,6 +843,10 @@
             .withSuccessHandler((res) => {
                 console.log("Guardado OK");
                 AppState.isDirty = true; // Optimization
+                if (res.lastUpdate) {
+                    AppState.lastUpdate = res.lastUpdate;
+                    renderLastUpdate();
+                }
             })
             .withFailureHandler((err) => {
                 alert("Error al guardar: " + err.message);

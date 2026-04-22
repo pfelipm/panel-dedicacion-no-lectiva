@@ -121,13 +121,18 @@
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
             <h2 class="font-bold text-slate-800">Planificador semanal</h2>
-            <div class="flex gap-2 text-xs">
-              <span class="flex items-center gap-1.5"><span
-                  class="w-2.5 h-2.5 rounded-full bg-blue-100 border border-blue-300"></span>
-                Lectivo</span>
+            <div class="flex flex-col items-end gap-1">
+              <div class="flex gap-2 text-xs">
+                <span class="flex items-center gap-1.5"><span
+                    class="w-2.5 h-2.5 rounded-full bg-blue-100 border border-blue-300"></span>
+                  Lectivo</span>
 
-              <span class="flex items-center gap-1.5"><span
-                  class="w-2.5 h-2.5 rounded-full bg-purple-100 border border-purple-300"></span> No lectivo</span>
+                <span class="flex items-center gap-1.5"><span
+                    class="w-2.5 h-2.5 rounded-full bg-purple-100 border border-purple-300"></span> No lectivo</span>
+              </div>
+              <div id="last-update-container" class="text-[10px] text-slate-400 italic hidden leading-tight">
+                <!-- JS WILL POPULATE THIS -->
+              </div>
             </div>
           </div>
 

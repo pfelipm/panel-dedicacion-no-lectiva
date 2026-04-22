@@ -90,7 +90,8 @@ function getInitialData() {
     myClasses: myTeachingClasses,
     // Admin: Lista de docentes para el selector
     teachersList: getAllTeachers(ss), // Visible para todos para el selector global
-    allRecords: getAllNonTeachingRecords(ss) // Data for Global View
+    allRecords: getAllNonTeachingRecords(ss), // Data for Global View
+    lastUpdate: getLastUpdateForUser(ss, userEmail)
   };
 }
 
@@ -116,16 +117,9 @@ function getTeacherData(targetEmail) {
       profile: profile
     },
     myRecords: getTeacherRecords(ss, targetEmail),
-    myClasses: getTeachingClasses(ss, profile.code)
+    myClasses: getTeachingClasses(ss, profile.code),
+    lastUpdate: getLastUpdateForUser(ss, targetEmail)
   };
-}
-
-// --- HELPER: GET CURRENT USER ---
-function getCurrentUserEmail() {
-  if (DEBUG_CONFIG.debug) {
-    return DEBUG_CONFIG.email;
-  }
-  return Session.getActiveUser().getEmail();
 }
 
 // --- HELPER: AUDIT SYSTEM ---
@@ -255,7 +249,10 @@ function saveSession(sessionData) {
   // AUDIT LOG
   logAudit(userEmail, sessionData.email, auditAction, sessionData);
 
-  return { success: true };
+  return { 
+    success: true,
+    lastUpdate: getLastUpdateForUser(ss, sessionData.email)
+  };
 }
 
 /**
@@ -313,7 +310,10 @@ function deleteSession(sessionData) {
         sheet.deleteRow(rowIndex);
       }
 
-      return { success: true };
+      return { 
+        success: true,
+        lastUpdate: getLastUpdateForUser(ss, sessionData.email)
+      };
     }
   }
 
@@ -539,4 +539,29 @@ function getAllNonTeachingRecords(ss) {
       group: row[5],
       notes: row[6] || ""
     }));
+}
+
+/**
+ * Obtiene la última modificación registrada en la hoja de Auditoría para un docente.
+ */
+function getLastUpdateForUser(ss, targetEmail) {
+  const sheet = ss.getSheetByName("Auditoría");
+  if (!sheet) return null;
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return null; // Solo cabecera
+
+  // Buscamos de abajo hacia arriba (más reciente primero)
+  // Estructura: A:Timestamp, B:Actor, C:Rol, D:Objetivo...
+  for (let i = data.length - 1; i >= 1; i--) {
+    const row = data[i];
+    if (row[3] === targetEmail) {
+      return {
+        timestamp: row[0] instanceof Date ? row[0].toISOString() : row[0],
+        actor: row[1]
+      };
+    }
+  }
+
+  return null;
 }
