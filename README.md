@@ -24,20 +24,25 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 
 ### 2. Gestión de roles y permisos
 *   **Docente**: Acceso a su propio horario y estadísticas personales.
-*   **Administrador**: Capacidad para ver y modificar el horario de cualquier docente mediante un selector dinámico.
-*   **Lector**: Acceso exclusivo a la vista global para supervisión.
+*   **Administrador**: Capacidad para ver y modificar el horario de cualquier docente, acceso a herramientas de supervisión y configuración.
+*   **Lector**: Acceso exclusivo a la vista global para consulta.
 
-### 3. Solapamientos excepcionales (solo administración) ⚠️
+### 3. Supervisión de incidencias (solo administración) 🔍
+*   Panel avanzado que escanea en tiempo real a toda la plantilla para detectar horarios incompletos.
+*   Muestra de forma compacta las 5 tarjetas de estadísticas de cada docente con validación pendiente.
+*   Acceso directo desde el informe al horario del docente para agilizar las correcciones.
+
+### 4. Solapamientos excepcionales (solo administración) ⚠️
 *   Permite a los administradores registrar sesiones no lectivas sobre franjas lectivas en periodos especiales (FCT, prácticas en empresa).
 *   Visualización mediante **pastillas divididas** que muestran ambas actividades simultáneamente.
 *   Confirmación de seguridad mediante modal dinámico antes de realizar la acción.
 
-### 4. Vista global (dashboard)
-*   Rejilla comparativa de todo el centro.
+### 5. Vista global (dashboard)
+*   Rejilla comparativa de todo el centro para el control de coberturas.
 *   Filtros avanzados por docente, búsqueda por nombre y tipo de actividad (guardias, tutorías, gestión).
 *   Tooltips informativos con notas adicionales de cada sesión.
 
-### 5. Trazabilidad total
+### 6. Trazabilidad total
 *   Muestra la **fecha, hora y autor de la última modificación** en cada ficha horaria.
 *   Sistema de auditoría automático que registra cada cambio en el backend.
 
