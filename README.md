@@ -41,15 +41,16 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 *   Muestra la **fecha, hora y autor de la última modificación** en cada ficha horaria.
 *   Sistema de auditoría automático que registra cada cambio en el backend.
 
-## 🚀 Desarrollo Local con Clasp
-Este proyecto está configurado para usarse con [clasp](https://github.com/google/clasp).
+## ✒️ Autor
+**Pablo Felip Monferrer**
 
-1.  Clonar el repositorio.
-2.  Instalar dependencias y configurar scriptId en `.clasp.json`.
-3.  Sincronizar cambios:
-    ```bash
-    clasp push
-    ```
+## 🚀 Despliegue y Sincronización
+Este proyecto utiliza [clasp](https://github.com/google/clasp) para la sincronización entre el repositorio local y el entorno de ejecución de Google Apps Script. 
+
+Para actualizar el script en la nube:
+```bash
+clasp push
+```
 
 ---
 *Desarrollado para la gestión eficiente de centros educativos.*
