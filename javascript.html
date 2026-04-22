@@ -12,6 +12,7 @@
         myRecords: [],     // Mis sesiones no lectivas
         myClasses: [],     // Mis clases lectivas
         teachersList: [],  // Admin Only
+        allClassesCount: {}, // Admin Only: { teacherCode: count }
         currentUser: null, // Logged in user (for Admin context)
         lastUpdate: null,  // Info de Auditoría
 
@@ -60,6 +61,7 @@
         AppState.myClasses = data.myClasses || [];
         AppState.teachersList = data.teachersList || [];
         AppState.allRecords = data.allRecords || [];
+        AppState.allClassesCount = data.allClassesCount || {};
         AppState.lastUpdate = data.lastUpdate || null;
 
         // Renderizar UI base
@@ -267,14 +269,17 @@
             document.getElementById('admin-menu').classList.remove('hidden');
         }
 
-        // Hide "Mi Horario" for Pure Readers or Pure Admins
-        const isTeacher = !!AppState.currentUser.profile;
-        const navSchedule = document.querySelector('[onclick="navigate(\'schedule\')"]');
+        // Hide "Mi Horario" only for Pure Readers (Not Admin and No Profile)
+        const isAdmin = AppState.currentUser?.isAdmin;
+        const isTeacher = !!AppState.currentUser?.profile;
+        const navSchedule = document.querySelector('[onclick="navigate(\'my-schedule\')"]');
 
-        if (!isTeacher) {
-            if (navSchedule) navSchedule.classList.add('hidden');
-        } else {
-            if (navSchedule) navSchedule.classList.remove('hidden');
+        if (navSchedule) {
+            if (isTeacher || isAdmin) {
+                navSchedule.classList.remove('hidden');
+            } else {
+                navSchedule.classList.add('hidden');
+            }
         }
     }
 
@@ -1292,6 +1297,128 @@
         });
     }
 
+    function renderSupervisionPanel() {
+        const container = document.getElementById('supervision-list');
+        const countEl = document.getElementById('supervision-count');
+        if (!container) return;
+
+        container.innerHTML = '';
+        if (!AppState.teachersList || !AppState.allRecords) return;
+
+        let incidencesFound = 0;
+
+        // Iterar sobre todos los docentes (Ya vienen ordenados alfabéticamente por el backend)
+        AppState.teachersList.forEach(teacher => {
+            // 1. Filtrar registros de este docente
+            const teacherRecords = AppState.allRecords.filter(r => r.email === teacher.email);
+            
+            // 2. Calcular Estadísticas (Misma lógica que updateStats)
+            let guardiasCount = 0;
+            const tutoriasGroups = new Set();
+            teacherRecords.forEach(r => {
+                if (r.type.toLowerCase().includes('guardia')) guardiasCount++;
+                if (r.type.toLowerCase().includes('tutoría') && r.group) tutoriasGroups.add(r.group);
+            });
+
+            const totalSessions = teacherRecords.length;
+            const classesCount = AppState.allClassesCount[teacher.code] || 0;
+
+            // Metas
+            const metaStr = teacher.metas.totalNonTeaching;
+            let metaVal = 0;
+            if (typeof metaStr === 'number') metaVal = metaStr;
+            else if (typeof metaStr === 'string') metaVal = parseFloat(metaStr) || 0;
+            const visualTarget = Math.round(metaVal);
+
+            const guardiasMeta = Math.round(teacher.metas.guardias || 0);
+            const requiredTutoria = teacher.metas.tutoria;
+            const isTutoriaRequired = requiredTutoria && requiredTutoria.toString().toLowerCase() !== 'no' && requiredTutoria !== '';
+
+            // 3. Verificar si es PENDIENTE
+            const isComplete = totalSessions >= visualTarget && guardiasCount >= guardiasMeta;
+
+            if (!isComplete) {
+                incidencesFound++;
+
+                // 4. Generar Caja del Docente
+                const card = document.createElement('div');
+                card.className = "bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 hover:border-blue-200 transition-colors group";
+                
+                // Header de la caja
+                card.innerHTML = `
+                    <div class="flex items-center justify-between border-b border-slate-50 pb-3">
+                        <div class="flex items-center gap-3">
+                            <div class="h-10 w-10 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center font-bold text-sm">
+                                ${teacher.code || '--'}
+                            </div>
+                            <div>
+                                <button onclick="switchTeacher('${teacher.email}'); navigate('my-schedule')" class="font-bold text-slate-800 hover:text-blue-600 transition-colors text-lg text-left block">
+                                    ${teacher.name}
+                                </button>
+                                <span class="text-xs text-slate-400 font-medium">${teacher.email}</span>
+                            </div>
+                        </div>
+                        <div class="px-3 py-1 rounded-md bg-orange-100 text-orange-600 text-xs font-bold uppercase tracking-wider">
+                            Pendiente
+                        </div>
+                    </div>
+
+                    <!-- Mini Grid de 5 Tarjetas -->
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <!-- Card 1: Total -->
+                        <div class="bg-slate-50/50 p-3 rounded-xl border border-slate-100 relative">
+                            <div class="text-[9px] text-slate-400 font-bold uppercase mb-1">Dedicación</div>
+                            <div class="text-lg font-bold ${totalSessions < visualTarget ? 'text-red-500' : 'text-slate-700'}">${totalSessions} / ${visualTarget}</div>
+                            <i class="ph-fill ${totalSessions < visualTarget ? 'ph-warning text-amber-500' : 'ph-check-circle text-emerald-500'} absolute top-2 right-2 text-sm opacity-40"></i>
+                        </div>
+
+                        <!-- Card 2: Guardias -->
+                        <div class="bg-slate-50/50 p-3 rounded-xl border border-slate-100 relative">
+                            <div class="text-[9px] text-slate-400 font-bold uppercase mb-1">Guardias</div>
+                            <div class="text-lg font-bold ${guardiasCount < guardiasMeta ? 'text-orange-600' : 'text-slate-700'}">${guardiasCount} / ${guardiasMeta}</div>
+                             <i class="ph-fill ${guardiasCount < guardiasMeta ? 'ph-warning text-amber-500' : 'ph-check-circle text-emerald-500'} absolute top-2 right-2 text-sm opacity-40"></i>
+                        </div>
+
+                        <!-- Card 3: Tutorías -->
+                        <div class="bg-slate-50/50 p-3 rounded-xl border border-slate-100 relative">
+                            <div class="text-[9px] text-slate-400 font-bold uppercase mb-1">Tutorías</div>
+                            <div class="text-lg font-bold ${isTutoriaRequired && tutoriasGroups.size === 0 ? 'text-red-500' : 'text-emerald-600'}">${tutoriasGroups.size}</div>
+                            <div class="text-[9px] text-slate-400 truncate">${isTutoriaRequired ? 'Requerida' : 'No requerida'}</div>
+                        </div>
+
+                        <!-- Card 4: Clases -->
+                        <div class="bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                            <div class="text-[9px] text-slate-400 font-bold uppercase mb-1">Lectivas</div>
+                            <div class="text-lg font-bold text-blue-600">${classesCount}</div>
+                            <div class="text-[9px] text-slate-400">Sesiones</div>
+                        </div>
+
+                        <!-- Card 5: Estado -->
+                        <div class="bg-orange-50/30 p-3 rounded-xl border border-orange-100 flex flex-col justify-center items-center text-center">
+                            <i class="ph-fill ph-clock-counter-clockwise text-orange-500 text-xl mb-1"></i>
+                            <div class="text-[10px] font-bold text-orange-600 uppercase">Incompleto</div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            }
+        });
+
+        countEl.textContent = incidencesFound;
+
+        if (incidencesFound === 0) {
+            container.innerHTML = `
+                <div class="bg-white p-12 rounded-2xl border border-dashed border-slate-200 text-center space-y-3">
+                    <div class="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i class="ph ph-check-circle text-4xl"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-800">Todo en orden</h3>
+                    <p class="text-slate-500 max-w-xs mx-auto">No se han detectado docentes con el horario de dedicación pendiente de completar.</p>
+                </div>
+            `;
+        }
+    }
+
     // Navegación Básica
     // --- UI HELPERS ---
 
@@ -1388,15 +1515,20 @@
                 refreshGlobalData();
             }
         }
+
+        if (viewId === 'supervision') {
+            renderSupervisionPanel();
+        }
     }
 
     function refreshGlobalData() {
-        showLoading("Actualizando vista global...");
+        showLoading("Actualizando datos globales...");
 
         google.script.run
             .withSuccessHandler((records) => {
                 AppState.allRecords = records;
                 renderGlobalDashboard();
+                renderSupervisionPanel();
                 AppState.isDirty = false; // Reset dirty flag
                 hideLoading();
             })
