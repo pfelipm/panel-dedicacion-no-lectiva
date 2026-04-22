@@ -178,12 +178,24 @@ function saveSession(sessionData) {
 
   // Validaciones básicas de seguridad
   const requesterEmail = userEmail;
+  const isAdmin = checkAdmin(ss, requesterEmail);
 
   // Si intenta guardar para otro, verificamos si es admin
   if (sessionData.email !== requesterEmail) {
-    const isAdmin = checkAdmin(ss, requesterEmail);
     if (!isAdmin) {
-      throw new Error("No puedes guardar sesiones de otro usuario.");
+      throw new Error("No tienes permisos para guardar sesiones de otro usuario.");
+    }
+  }
+
+  // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA
+  // Solo los administradores pueden guardar sesiones que solapen con lectivas
+  const teacherProfile = getTeacherProfile(ss, sessionData.email);
+  if (teacherProfile) {
+    const teachingClasses = getTeachingClasses(ss, teacherProfile.code);
+    const hasOverlap = teachingClasses.some(c => c.day === sessionData.day && c.start === sessionData.start);
+    
+    if (hasOverlap && !isAdmin) {
+      throw new Error("No tienes permisos para registrar sesiones no lectivas superpuestas a clases regulares. Esta acción requiere autorización de administración.");
     }
   }
 

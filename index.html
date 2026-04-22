@@ -328,11 +328,11 @@
     class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center">
     <div
       class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100 p-6 text-center space-y-4">
-      <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-2">
-        <i class="ph ph-warning text-2xl"></i>
+      <div id="confirm-icon-container" class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-2">
+        <i id="confirm-icon" class="ph ph-warning text-2xl"></i>
       </div>
-      <h3 class="font-bold text-lg text-slate-800">¿Eliminar sesión?</h3>
-      <p class="text-slate-500 text-sm">Esta acción no se puede deshacer.</p>
+      <h3 id="confirm-title" class="font-bold text-lg text-slate-800">¿Eliminar sesión?</h3>
+      <p id="confirm-message" class="text-slate-500 text-sm">Esta acción no se puede deshacer.</p>
 
       <div class="flex gap-3 pt-2">
         <button id="btn-confirm-cancel"

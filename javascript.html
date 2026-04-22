@@ -336,33 +336,32 @@
                 const td = document.createElement('td');
                 td.className = "py-2 px-2 border-l border-slate-100 relative h-16 align-top";
 
-                // Verificar Tipo de Slot (Lectivo vs Descanso)
-                // Buscamos si para este 'day' y este rango horario, el slot es BREAK en el backend
-                // (Nota simplificada: En backend sacamos unique slots, aquí asumimos estructura regular)
-                // Verificamos "Clases Lectivas" asignadas al usuario
-                const myClass = AppState.myClasses.find(c =>
-                    c.day === day && c.start === slot.start
-                );
+                // BUSCAR DATOS PARA ESTE SLOT
+                const myClass = AppState.myClasses.find(c => c.day === day && c.start === slot.start);
+                const myRecord = AppState.myRecords.find(r => r.day === day && r.start === slot.start);
 
-                if (myClass) {
-                    // -- CLASE LECTIVA --
-                    renderClassCell(td, myClass);
+                if (myClass && myRecord) {
+                    // -- SOLAPAMIENTO (LECTIVA + NO LECTIVA) --
+                    renderSplitCell(td, day, slot.start, slot.end, myClass, myRecord);
+                } else if (myClass) {
+                    // -- SOLO CLASE LECTIVA --
+                    renderClassCell(td, day, slot.start, slot.end, myClass);
+                } else if (myRecord) {
+                    // -- SOLO SESIÓN NO LECTIVA --
+                    renderInteractiveCell(td, day, slot.start, slot.end, myRecord);
                 } else {
-                    // Verificar si es un descanso (Break)
-                    // Esto requiere mirar el slot específico para este día en la data original completa (schedule)
+                    // -- SLOT VACÍO O DESCANSO --
                     const scheduleItem = AppState.schedule.find(s => s.day === day && s.start === slot.start);
-                    const isBreak = scheduleItem ? scheduleItem.type === 'BREAK' : false; // Default false
+                    const isBreak = scheduleItem ? scheduleItem.type === 'BREAK' : false;
 
                     if (isBreak) {
-                        // -- DESCANSO -- 
-                        td.className += " bg-slate-100/50"; // Gris sutil
+                        td.className += " bg-slate-100/50";
                         const span = document.createElement('span');
                         span.className = "text-[10px] text-slate-400 font-medium uppercase tracking-wider block text-center mt-2";
                         span.textContent = "Descanso";
                         td.appendChild(span);
                     } else {
-                        // -- SLOT LIBRE (Interactivo) --
-                        renderInteractiveCell(td, day, slot.start, slot.end);
+                        renderInteractiveCell(td, day, slot.start, slot.end, null);
                     }
                 }
 
@@ -373,26 +372,78 @@
         });
     }
 
-    function renderClassCell(td, classData) {
+    function renderClassCell(td, day, start, end, classData) {
         td.className += " bg-blue-50/50";
-        td.innerHTML = `
-                    <div class="h-full w-full rounded-md border border-blue-100 bg-blue-100 p-2 text-xs flex flex-col justify-center">
-                        <div class="font-bold text-blue-700">${classData.group}</div>
-                        <div class="text-blue-600 truncate">${classData.module || '--'}</div>
-                        <div class="mt-1 text-[10px] text-blue-500 flex items-center gap-1">
-                            <i class="ph-fill ph-chalkboard-teacher"></i> ${classData.classroom || 'Aula ?'}
-                        </div>
-                    </div>
-                    `;
+        const container = document.createElement('div');
+        
+        // El administrador puede hacer clic para añadir una sesión excepcional
+        const isAdmin = AppState.currentUser.isAdmin;
+        if (isAdmin) {
+            container.className = "h-full w-full rounded-md border border-blue-100 bg-blue-100 p-2 text-xs flex flex-col justify-center cursor-pointer hover:bg-blue-200 transition-colors group";
+            container.title = "Clic para añadir sesión no lectiva excepcional";
+            container.onclick = () => {
+                showConfirmModal({
+                    title: "Sesión excepcional",
+                    message: "Esta franja tiene asignada una sesión lectiva. ¿Deseas añadir una sesión no lectiva superpuesta de forma excepcional?",
+                    icon: "ph-warning-octagon",
+                    iconContainerClass: "bg-amber-100 text-amber-600",
+                    confirmText: "Continuar",
+                    confirmClass: "bg-blue-600 hover:bg-blue-700",
+                    onConfirm: () => openEditor(day, start, end, null)
+                });
+            };
+        } else {
+            container.className = "h-full w-full rounded-md border border-blue-100 bg-blue-100 p-2 text-xs flex flex-col justify-center";
+        }
+
+        container.innerHTML = `
+            <div class="font-bold text-blue-700">${classData.group}</div>
+            <div class="text-blue-600 truncate">${classData.module || '--'}</div>
+            <div class="mt-1 text-[10px] text-blue-500 flex items-center gap-1">
+                <i class="ph-fill ph-chalkboard-teacher"></i> ${classData.classroom || 'Aula ?'}
+                ${isAdmin ? '<i class="ph ph-plus-circle ml-auto opacity-0 group-hover:opacity-100 transition-opacity"></i>' : ''}
+            </div>
+        `;
+        td.appendChild(container);
     }
 
-    function renderInteractiveCell(td, day, start, end) {
-        // Buscar si ya tengo sesión NO LECTIVA grabada aquí
-        const myRecord = AppState.myRecords.find(r =>
-            r.day === day && r.start === start
-        );
+    function renderSplitCell(td, day, start, end, classData, recordData) {
+        td.className += " p-1";
+        const container = document.createElement('div');
+        container.className = "h-full w-full flex flex-col gap-0.5 cursor-pointer";
+        container.onclick = () => openEditor(day, start, end, recordData);
 
-        if (myRecord) {
+        // Mitad Superior: Clase Lectiva (Compacta)
+        const classPart = document.createElement('div');
+        classPart.className = "flex-1 bg-blue-100 border border-blue-200 rounded-t-md p-1 px-1.5 flex items-center justify-between text-[10px]";
+        classPart.innerHTML = `
+            <span class="font-bold text-blue-700">${classData.group}</span>
+            <span class="text-blue-600 truncate max-w-[60px] ml-1">${classData.module || '--'}</span>
+        `;
+
+        // Mitad Inferior: Sesión No Lectiva
+        const recordPart = document.createElement('div');
+        let recordStyles = "bg-[#e6cff2] border-slate-300";
+        if (recordData.type.toLowerCase().includes('guardia')) recordStyles = "bg-[#e6cff2] border-l-4 border-orange-500 shadow-sm";
+        else if (recordData.type.toLowerCase().includes('tutoría')) recordStyles = "bg-[#e6cff2] border-l-4 border-emerald-600 shadow-sm";
+
+        recordPart.className = `flex-1 rounded-b-md p-1 px-1.5 text-[10px] border flex flex-col justify-center ${recordStyles}`;
+        
+        let titleText = recordData.type;
+        if (recordData.type.toLowerCase().includes('tutoría') && recordData.group) titleText = `Tutoría ${recordData.group}`;
+
+        recordPart.innerHTML = `
+            <div class="font-bold text-slate-800 truncate">${titleText}</div>
+            ${recordData.notes ? '<i class="ph-fill ph-info text-blue-600 absolute bottom-1 right-1 text-[10px]"></i>' : ''}
+        `;
+
+        container.appendChild(classPart);
+        container.appendChild(recordPart);
+        td.appendChild(container);
+    }
+
+    function renderInteractiveCell(td, day, start, end, existingRecord) {
+        if (existingRecord) {
             // -- SESIÓN NO LECTIVA EXISTENTE --
             const el = document.createElement('div');
 
@@ -400,11 +451,9 @@
             let baseClasses = "bg-[#e6cff2] text-slate-700 border";
 
             // Bordes gruesos según tipo (Mismo color que tarjetas superiores)
-            if (myRecord.type.toLowerCase().includes('guardia')) {
-                baseClasses += " border-l-[6px] border-orange-500 border-t border-b border-r border-slate-200/50";
-                // Guardias Orange
+            if (existingRecord.type.toLowerCase().includes('guardia')) {
                 baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-orange-500 shadow-sm";
-            } else if (myRecord.type.toLowerCase().includes('tutoría')) {
+            } else if (existingRecord.type.toLowerCase().includes('tutoría')) {
                 // Tutorías Emerald
                 baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-emerald-600 shadow-sm";
             } else {
@@ -415,28 +464,19 @@
             el.className = `cursor-pointer h-full w-full rounded-md p-2 text-xs transition-transform hover:scale-[1.02] active:scale-95 shadow-sm ${baseClasses} relative group/card`;
 
             // Formateo Texto
-            let titleText = myRecord.type;
+            let titleText = existingRecord.type;
             let subtitleHtml = "";
 
-            if (myRecord.type.toLowerCase().includes('tutoría') && myRecord.group) {
-                // "Tutoría [Grupo]" 
-                // Asumimos que myRecord.type ya dice "Tutoría". Si es "Tutoría EE1" (del select) ya está bien.
-                // Pero si el select dice solo "Tutoría" y el grupo va aparte.
-                // El select values son "Tutoría", "Guardia", etc.
-                // El usuario quiere: "Titoría" + espacio + código de grupo
-                // Corrección: "Titoría" -> "Tutoría" (typo usuario?) asumo Tutoría.
-                titleText = `Tutoría ${myRecord.group}`;
-                // Subtítulo eliminado
+            if (existingRecord.type.toLowerCase().includes('tutoría') && existingRecord.group) {
+                titleText = `Tutoría ${existingRecord.group}`;
             } else {
-                // Otras: Título normal, subtítulo grupo si existe
-                subtitleHtml = myRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${myRecord.group}</div>` : '';
+                subtitleHtml = existingRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${existingRecord.group}</div>` : '';
             }
 
             // INFO ICON & TOOLTIP
             let infoIconHtml = "";
-            if (myRecord.notes) {
-                // Escape HTML simple for notes to avoid breaking layout
-                const safeNotes = myRecord.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            if (existingRecord.notes) {
+                const safeNotes = existingRecord.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 infoIconHtml = `
                     <div class="absolute top-1 right-1 group z-10">
                          <div class="bg-white/50 hover:bg-white rounded-full p-0.5 transition-colors cursor-help">
@@ -455,7 +495,7 @@
                     ${subtitleHtml}
                     ${infoIconHtml}
                     `;
-            el.onclick = () => openEditor(day, start, end, myRecord);
+            el.onclick = () => openEditor(day, start, end, existingRecord);
             td.appendChild(el);
 
         } else {
@@ -587,24 +627,69 @@
         currentEditing = null;
     }
 
-    // Listener ELIMINAR
-    // Listener ELIMINAR (Abre Modal Prompt)
+    // --- SISTEMA DE CONFIRMACIÓN DINÁMICO ---
+
+    /**
+     * Muestra un modal de confirmación genérico.
+     * @param {Object} options { title, message, icon, confirmText, confirmClass, onConfirm }
+     */
+    function showConfirmModal(options) {
+        const modal = document.getElementById('modal-confirm');
+        const titleEl = document.getElementById('confirm-title');
+        const messageEl = document.getElementById('confirm-message');
+        const iconEl = document.getElementById('confirm-icon');
+        const iconContainer = document.getElementById('confirm-icon-container');
+        const btnOk = document.getElementById('btn-confirm-ok');
+        const btnCancel = document.getElementById('btn-confirm-cancel');
+
+        // Configurar contenido
+        titleEl.textContent = options.title || "¿Estás seguro?";
+        messageEl.textContent = options.message || "Esta acción no se puede deshacer.";
+        btnOk.textContent = options.confirmText || "Confirmar";
+        
+        // Estilos del botón OK
+        btnOk.className = "flex-1 px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-md transition-all " + 
+                          (options.confirmClass || "bg-blue-600 hover:bg-blue-700 shadow-blue-200");
+
+        // Icono y su contenedor
+        iconEl.className = "ph text-2xl " + (options.icon || "ph-warning");
+        iconContainer.className = "w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 " + 
+                                 (options.iconContainerClass || "bg-blue-100 text-blue-600");
+
+        // Limpiar listeners anteriores clonando el botón
+        const newBtnOk = btnOk.cloneNode(true);
+        btnOk.parentNode.replaceChild(newBtnOk, btnOk);
+
+        const newBtnCancel = btnCancel.cloneNode(true);
+        btnCancel.parentNode.replaceChild(newBtnCancel, btnCancel);
+
+        // Eventos
+        newBtnOk.onclick = () => {
+            modal.classList.add('hidden');
+            if (options.onConfirm) options.onConfirm();
+        };
+
+        newBtnCancel.onclick = () => {
+            modal.classList.add('hidden');
+        };
+
+        // Mostrar
+        modal.classList.remove('hidden');
+    }
+
+    // Listener ELIMINAR (Usa el nuevo sistema)
     document.getElementById('btn-delete').addEventListener('click', () => {
         if (!currentEditing) return;
-        // Mostrar Modal Confirm
-        document.getElementById('modal-confirm').classList.remove('hidden');
-    });
-
-    // Listener Confirmación OK
-    document.getElementById('btn-confirm-ok').addEventListener('click', () => {
-        // Cerrar modal confirm
-        document.getElementById('modal-confirm').classList.add('hidden');
-        performDelete();
-    });
-
-    // Listener Confirmación Cancel
-    document.getElementById('btn-confirm-cancel').addEventListener('click', () => {
-        document.getElementById('modal-confirm').classList.add('hidden');
+        
+        showConfirmModal({
+            title: "¿Eliminar sesión?",
+            message: "Esta acción eliminará el registro de dedicación no lectiva para esta franja.",
+            icon: "ph-trash",
+            iconContainerClass: "bg-red-100 text-red-600",
+            confirmText: "Eliminar",
+            confirmClass: "bg-red-600 hover:bg-red-700 shadow-red-200",
+            onConfirm: performDelete
+        });
     });
 
     function showCrudToast(text) {
