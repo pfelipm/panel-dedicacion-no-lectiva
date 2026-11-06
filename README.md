@@ -3,15 +3,16 @@
 Aplicación web desarrollada con **Google Apps Script** diseñada para centros educativos. Permite al profesorado gestionar sus franjas horarias no lectivas (guardias, tutorías, gestión) de forma integrada con el horario lectivo importado, garantizando trazabilidad y cumplimiento de objetivos horarios.
 
 ## 🎯 Objetivo del proyecto
-Optimizar la planificación del horario no lectivo del profesorado, proporcionando una interfaz intuitiva que evite conflictos horarios, facilite la supervisión por parte de jefatura de estudios y asegure que se cumplen las horas de dedicación ajustadas a cada docente.
+Optimizar la planificación del horario no lectivo del profesorado, proporcionando una interfaz intuitiva que evite conflictos horarios, facilite la supervisión por parte de jefatura de estudios y asegure que se cumplen las sesiones de dedicación ajustadas a cada docente.
 
 ## 🛠️ Detalles técnicos
 *   **Backend**: Google Apps Script (GAS) vinculado a Google Sheets.
 *   **Despliegue**: Webapp restringida a los usuarios del dominio del centro (`access: DOMAIN`).
 *   **Validación**: el servidor comprueba tipo, día, franja y grupo; `LockService` evita escrituras concurrentes.
+*   **Unidad de medida**: todas las metas y contadores se expresan en **sesiones semanales**. Cada franja cuenta como 1 sesión, aunque su duración real sea de 55 minutos. El tiempo solo se usa para colocar las sesiones en la rejilla y detectar solapamientos, no para contabilizar.
 *   **Frontend**: HTML5, JavaScript (ES6+), **Tailwind CSS** para el diseño responsivo y **Phosphor Icons**.
 *   **Base de datos**: Google Sheets (5 pestañas principales):
-    *   `Resumen HS`: Perfiles docentes, códigos y metas horarias.
+    *   `Resumen HS`: Perfiles docentes, códigos y metas en sesiones semanales.
     *   `Horario no lectivo`: Repositorio de todas las sesiones registradas.
     *   `Clases (importado)`: Horario lectivo oficial del centro.
     *   `Ajustes`: Configuración de tipos de actividad y grupos.
