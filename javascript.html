@@ -22,6 +22,21 @@
         }
     };
 
+    // --- HELPERS DE SEGURIDAD ---
+
+    /**
+     * Escapa texto antes de insertarlo en HTML o en atributos.
+     * Necesario para datos de usuario (notas) y datos provenientes de la hoja.
+     */
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     // --- INICIALIZACIÓN ---
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -485,13 +500,13 @@
         // Mitad Inferior: Sesión No Lectiva
         const recordPart = document.createElement('div');
         let recordStyles = "bg-[#e6cff2] border-slate-300";
-        if (recordData.type.toLowerCase().includes('guardia')) recordStyles = "bg-[#e6cff2] border-l-4 border-orange-500 shadow-sm";
-        else if (recordData.type.toLowerCase().includes('tutoría')) recordStyles = "bg-[#e6cff2] border-l-4 border-emerald-600 shadow-sm";
+        if ((recordData.type || '').toLowerCase().includes('guardia')) recordStyles = "bg-[#e6cff2] border-l-4 border-orange-500 shadow-sm";
+        else if ((recordData.type || '').toLowerCase().includes('tutoría')) recordStyles = "bg-[#e6cff2] border-l-4 border-emerald-600 shadow-sm";
 
         recordPart.className = `flex-1 rounded-b-md p-1 px-1.5 text-[10px] border flex flex-col justify-center ${recordStyles}`;
         
         let titleText = recordData.type;
-        if (recordData.type.toLowerCase().includes('tutoría') && recordData.group) titleText = `Tutoría ${recordData.group}`;
+        if ((recordData.type || '').toLowerCase().includes('tutoría') && recordData.group) titleText = `Tutoría ${recordData.group}`;
 
         recordPart.innerHTML = `
             <div class="font-bold text-slate-800 truncate">${titleText}</div>
@@ -512,9 +527,9 @@
             let baseClasses = "bg-[#e6cff2] text-slate-700 border";
 
             // Bordes gruesos según tipo (Mismo color que tarjetas superiores)
-            if (existingRecord.type.toLowerCase().includes('guardia')) {
+            if ((existingRecord.type || '').toLowerCase().includes('guardia')) {
                 baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-orange-500 shadow-sm";
-            } else if (existingRecord.type.toLowerCase().includes('tutoría')) {
+            } else if ((existingRecord.type || '').toLowerCase().includes('tutoría')) {
                 // Tutorías Emerald
                 baseClasses = "bg-[#e6cff2] text-slate-700 border-l-[8px] border-emerald-600 shadow-sm";
             } else {
@@ -528,7 +543,7 @@
             let titleText = existingRecord.type;
             let subtitleHtml = "";
 
-            if (existingRecord.type.toLowerCase().includes('tutoría') && existingRecord.group) {
+            if ((existingRecord.type || '').toLowerCase().includes('tutoría') && existingRecord.group) {
                 titleText = `Tutoría ${existingRecord.group}`;
             } else {
                 subtitleHtml = existingRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${existingRecord.group}</div>` : '';
@@ -537,7 +552,7 @@
             // INFO ICON & TOOLTIP
             let infoIconHtml = "";
             if (existingRecord.notes) {
-                const safeNotes = existingRecord.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const safeNotes = escapeHtml(existingRecord.notes);
                 infoIconHtml = `
                     <div class="absolute top-1 right-1 group z-10">
                          <div class="bg-white/50 hover:bg-white rounded-full p-0.5 transition-colors cursor-help">
@@ -872,8 +887,8 @@
         const tutoriasGroups = new Set(); // Grupos únicos cubiertos
 
         AppState.myRecords.forEach(r => {
-            if (r.type.toLowerCase().includes('guardia')) guardiasCount++;
-            if (r.type.toLowerCase().includes('tutoría') && r.group) {
+            if ((r.type || '').toLowerCase().includes('guardia')) guardiasCount++;
+            if ((r.type || '').toLowerCase().includes('tutoría') && r.group) {
                 tutoriasGroups.add(r.group);
             }
         });
@@ -927,7 +942,7 @@
             const groupCounts = {};
             let hasMultiple = false;
             AppState.myRecords.forEach(r => {
-                if (r.type.toLowerCase().includes('tutoría') && r.group) {
+                if ((r.type || '').toLowerCase().includes('tutoría') && r.group) {
                     groupCounts[r.group] = (groupCounts[r.group] || 0) + 1;
                     if (groupCounts[r.group] > 1) hasMultiple = true;
                 }
@@ -1188,7 +1203,7 @@
             if (!GlobalFilters.selectedTeachers.has(r.email)) return false;
 
             // Filter Type
-            const tLower = r.type.toLowerCase();
+            const tLower = (r.type || '').toLowerCase();
             let typeKey = 'gestion';
             if (tLower.includes('guardia')) typeKey = 'guardia';
             else if (tLower.includes('tutoría')) typeKey = 'tutoria';
@@ -1240,7 +1255,7 @@
 
                         // Determine Style based on type
                         let typeClass = "bg-purple-50 text-purple-700 border-purple-100"; // Default Gestión
-                        const tLower = rec.type.toLowerCase();
+                        const tLower = (rec.type || '').toLowerCase();
                         if (tLower.includes('guardia')) typeClass = "bg-orange-50 text-orange-700 border-orange-100";
                         if (tLower.includes('tutoría')) typeClass = "bg-emerald-50 text-emerald-700 border-emerald-100";
 
@@ -1257,32 +1272,26 @@
                             shortType = "G";
                         } else if (tLower.includes('tutoría')) {
                             shortType = "T";
-                            if (rec.group) extraContent = `<div class="h-3 w-px bg-current opacity-40 mx-0.5"></div><span class="opacity-75 text-[9px]">${rec.group}</span>`;
+                            if (rec.group) extraContent = `<div class="h-3 w-px bg-current opacity-40 mx-0.5"></div><span class="opacity-75 text-[9px]">${escapeHtml(rec.group)}</span>`;
                         } else {
                             shortType = "•";
                         }
 
                         // Name (First word + Initial?) -> Simple: Full Name truncate
-                        const name = getName(rec.email).split(' ')[0];
+                        const name = escapeHtml(getName(rec.email).split(' ')[0]);
 
-                        // Info Icon logic
-                        let infoIconHtml = "";
+                        pill.innerHTML = `<span class="opacity-70 font-bold min-w-[10px]">${escapeHtml(shortType)}</span> <span>${name}</span> ${extraContent}`;
+
+                        // Icono de notas: se crea como nodo y el tooltip se enlaza por JS.
+                        // No se interpola el texto en un atributo (evita inyección de HTML/JS).
                         if (rec.notes) {
-                            const safeNotes = rec.notes.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                            // Use onmouseenter/leave for Global Tooltip
-                            // We need to pass the notes carefully. 
-                            // Since safeNotes is string, we can put it in function call or data attribute.
-                            // data-tooltip attribute is cleaner.
-                            infoIconHtml = `
-                                <div class="ml-auto pl-1 cursor-help opacity-70 hover:opacity-100 flex items-center" 
-                                     onmouseenter="Tooltip.show('${safeNotes}', this)" 
-                                     onmouseleave="Tooltip.hide()">
-                                    <i class="ph-fill ph-info text-[10px]"></i>
-                                </div>
-                            `;
+                            const info = document.createElement('div');
+                            info.className = "ml-auto pl-1 cursor-help opacity-70 hover:opacity-100 flex items-center";
+                            info.innerHTML = '<i class="ph-fill ph-info text-[10px]"></i>';
+                            info.addEventListener('mouseenter', () => Tooltip.show(rec.notes, info));
+                            info.addEventListener('mouseleave', () => Tooltip.hide());
+                            pill.appendChild(info);
                         }
-
-                        pill.innerHTML = `<span class="opacity-70 font-bold min-w-[10px]">${shortType}</span> <span>${getName(rec.email)}</span> ${extraContent} ${infoIconHtml}`;
 
                         container.appendChild(pill);
                     });
@@ -1316,22 +1325,23 @@
             let guardiasCount = 0;
             const tutoriasGroups = new Set();
             teacherRecords.forEach(r => {
-                if (r.type.toLowerCase().includes('guardia')) guardiasCount++;
-                if (r.type.toLowerCase().includes('tutoría') && r.group) tutoriasGroups.add(r.group);
+                if ((r.type || '').toLowerCase().includes('guardia')) guardiasCount++;
+                if ((r.type || '').toLowerCase().includes('tutoría') && r.group) tutoriasGroups.add(r.group);
             });
 
             const totalSessions = teacherRecords.length;
             const classesCount = AppState.allClassesCount[teacher.code] || 0;
 
-            // Metas
-            const metaStr = teacher.metas.totalNonTeaching;
+            // Metas (solo llegan a administración; si faltan, se asumen 0)
+            const metas = teacher.metas || {};
+            const metaStr = metas.totalNonTeaching;
             let metaVal = 0;
             if (typeof metaStr === 'number') metaVal = metaStr;
             else if (typeof metaStr === 'string') metaVal = parseFloat(metaStr) || 0;
             const visualTarget = Math.round(metaVal);
 
-            const guardiasMeta = Math.round(teacher.metas.guardias || 0);
-            const requiredTutoria = teacher.metas.tutoria;
+            const guardiasMeta = Math.round(metas.guardias || 0);
+            const requiredTutoria = metas.tutoria;
             const isTutoriaRequired = requiredTutoria && requiredTutoria.toString().toLowerCase() !== 'no' && requiredTutoria !== '';
 
             // 3. Verificar si es PENDIENTE
@@ -1449,7 +1459,7 @@
             if (!el) return;
 
             // Simple sanitization or trust text (internal app)
-            el.innerHTML = text;
+            el.textContent = text || '';
             el.classList.remove('hidden');
 
             // Positioning

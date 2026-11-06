@@ -39,6 +39,29 @@ function getCurrentUserEmail() {
   return Session.getActiveUser().getEmail();
 }
 
+/**
+ * Comprueba que el usuario tiene acceso a la app.
+ * Perfiles válidos: docente registrado, administrador o lector.
+ * Devuelve el contexto para no repetir lecturas de las hojas.
+ */
+function assertAuthorized(ss, email) {
+  // Sin email no hay identidad: evita que una cuenta no identificada
+  // pudiera casar con filas vacías de la hoja.
+  if (!email) {
+    throw new Error("No se ha podido identificar tu cuenta de usuario.");
+  }
+
+  const profile = getTeacherProfile(ss, email);
+  const isAdmin = checkAdmin(ss, email);
+  const isReader = checkReader(ss, email);
+
+  if (!profile && !isAdmin && !isReader) {
+    throw new Error("No tienes permisos de acceso o no estás registrado como docente.");
+  }
+
+  return { profile, isAdmin, isReader };
+}
+
 // --- API PÚBLICA (LLAMADA DESDE FRONTEND) ---
 
 /**
@@ -52,15 +75,11 @@ function getInitialData() {
   const userEmail = getCurrentUserEmail();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1. Identificar Usuario
-  const teacherProfile = getTeacherProfile(ss, userEmail);
-  const isAdmin = checkAdmin(ss, userEmail);
-  const isReader = checkReader(ss, userEmail);
-
-  // Allow access if Teacher OR Admin OR Reader
-  if (!teacherProfile && !isAdmin && !isReader) {
-    throw new Error("No tienes permisos de acceso o no estás registrado como docente.");
-  }
+  // 1. Identificar Usuario y validar acceso (docente OR admin OR reader)
+  const access = assertAuthorized(ss, userEmail);
+  const teacherProfile = access.profile;
+  const isAdmin = access.isAdmin;
+  const isReader = access.isReader;
 
   // 2. Configuración
   const config = getAppConfig(ss);
@@ -88,10 +107,10 @@ function getInitialData() {
     schedule: scheduleSlots, // Restored
     myRecords: myRecords,
     myClasses: myTeachingClasses,
-    // Admin: Lista de docentes para el selector
-    teachersList: getAllTeachers(ss), // Visible para todos para el selector global
-    allRecords: getAllNonTeachingRecords(ss), // Data for Global View
-    allClassesCount: getAllClassesCount(ss), // Summary of classes for Supervision
+    // Lista de docentes para el selector. Las metas solo se envían a administración.
+    teachersList: getAllTeachers(ss, isAdmin),
+    allRecords: readAllNonTeachingRecords(ss), // Vista global: visible para todo el profesorado autorizado
+    allClassesCount: isAdmin ? getAllClassesCount(ss) : {}, // Solo supervisión (admin)
     lastUpdate: getLastUpdateForUser(ss, userEmail)
   };
 }
@@ -306,7 +325,7 @@ function deleteSession(sessionData) {
 
       // Si es la fila 2 y es la ÚNICA fila de datos, no borrar fila, borrar contenido
       if (rowIndex === 2 && lastRow === 2) {
-        sheet.getRange(2, 1, 1, 6).clearContent();
+        sheet.getRange(2, 1, 1, 7).clearContent(); // 7 columnas (incluye notas)
       } else {
         sheet.deleteRow(rowIndex);
       }
@@ -325,6 +344,7 @@ function deleteSession(sessionData) {
 // --- FUNCIONES PRIVADAS / HELPERS ---
 
 function getTeacherProfile(ss, email) {
+  if (!email) return null;
   const sheet = ss.getSheetByName(SHEET_NAMES.TEACHERS);
   const data = sheet.getDataRange().getValues();
   const headers = data[2]; // Encabezados en fila 3 (índice 2)
@@ -489,7 +509,7 @@ function formatTime(dateObj) {
   return dateObj; // Asumimos string si no es Date
 }
 
-function getAllTeachers(ss) {
+function getAllTeachers(ss, includeMeta) {
   const sheet = ss.getSheetByName(SHEET_NAMES.TEACHERS);
   const data = sheet.getDataRange().getValues();
   const headers = data[2]; // Encabezados en fila 3 (índice 2)
@@ -520,16 +540,22 @@ function getAllTeachers(ss) {
   // Filtramos filas válidas (que tengan email y nombre) y empezamos en fila 4
   return data.slice(3)
     .filter(r => r[idxEmail] && r[idxName])
-    .map(r => ({
-      name: r[idxName],
-      email: r[idxEmail],
-      code: r[idxCode],
-      metas: {
-        totalNonTeaching: r[idxMeta],
-        guardias: r[idxGuardias],
-        tutoria: r[idxTutoria]
+    .map(r => {
+      const teacher = {
+        name: r[idxName],
+        email: r[idxEmail],
+        code: r[idxCode]
+      };
+      // Las metas horarias solo las consume la administración (supervisión)
+      if (includeMeta) {
+        teacher.metas = {
+          totalNonTeaching: r[idxMeta],
+          guardias: r[idxGuardias],
+          tutoria: r[idxTutoria]
+        };
       }
-    }))
+      return teacher;
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -553,16 +579,28 @@ function getAllClassesCount(ss) {
   
   return summary;
 }
+
 /**
- * Obtiene TODOS los registros no lectivos de TODOS los docentes
- * Ordenado por Día y Hora para facilitar renderizado
+ * Endpoint público para la vista global (llamado desde el frontend).
+ * La vista global es visible para todo el profesorado autorizado, pero exige
+ * que el usuario esté registrado en la app (docente, admin o lector).
  */
 function getAllNonTeachingRecords(ss) {
   if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
+  assertAuthorized(ss, getCurrentUserEmail());
+  return readAllNonTeachingRecords(ss);
+}
+
+/**
+ * Lectura interna de todos los registros (sin comprobación de permisos).
+ * Solo debe invocarse desde código que ya haya validado el acceso.
+ */
+function readAllNonTeachingRecords(ss) {
   const sheet = ss.getSheetByName(SHEET_NAMES.RECORDS);
   const data = sheet.getDataRange().getValues().slice(1); // Skip header
 
   return data
+    .filter(row => row[0]) // Ignorar filas vacías (p. ej. tras borrar el último registro)
     .map(row => ({
       email: row[0],
       day: row[1],
