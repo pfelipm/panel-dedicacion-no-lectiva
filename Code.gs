@@ -91,6 +91,7 @@ function getInitialData() {
     // Admin: Lista de docentes para el selector
     teachersList: getAllTeachers(ss), // Visible para todos para el selector global
     allRecords: getAllNonTeachingRecords(ss), // Data for Global View
+    allClassesCount: getAllClassesCount(ss), // Summary of classes for Supervision
     lastUpdate: getLastUpdateForUser(ss, userEmail)
   };
 }
@@ -505,6 +506,11 @@ function getAllTeachers(ss) {
     return s.includes("email") || s.includes("correo") || s.includes("mail");
   });
 
+  const idxCode = headers.findIndex(h => h === "Código" || h === "Codigo");
+  const idxMeta = 9; // Col J (índice 9) -> HS no lectivas ajustadas
+  const idxGuardias = headers.findIndex(h => String(h).toLowerCase().includes("guardias sem"));
+  const idxTutoria = headers.findIndex(h => String(h).toLowerCase().includes("tutoría grupo"));
+
   if (idxEmail === -1) {
     // Si no encuentra email, retornamos string vacío (o error)
     console.error("No se encontró columna Email en Resumen HS");
@@ -516,9 +522,36 @@ function getAllTeachers(ss) {
     .filter(r => r[idxEmail] && r[idxName])
     .map(r => ({
       name: r[idxName],
-      email: r[idxEmail]
+      email: r[idxEmail],
+      code: r[idxCode],
+      metas: {
+        totalNonTeaching: r[idxMeta],
+        guardias: r[idxGuardias],
+        tutoria: r[idxTutoria]
+      }
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Cuenta las sesiones lectivas por cada docente
+ * Retorna un objeto: { 'CODIGO_DOCENTE': count }
+ */
+function getAllClassesCount(ss) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.CLASSES);
+  const data = sheet.getDataRange().getValues();
+  const rows = data.slice(1);
+  
+  const summary = {};
+  
+  rows.forEach(row => {
+    const teacherCode = row[3]; // Columna D
+    if (teacherCode) {
+      summary[teacherCode] = (summary[teacherCode] || 0) + 1;
+    }
+  });
+  
+  return summary;
 }
 /**
  * Obtiene TODOS los registros no lectivos de TODOS los docentes
