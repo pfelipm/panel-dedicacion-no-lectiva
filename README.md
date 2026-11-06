@@ -56,22 +56,28 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 El proyecto se gestiona con [clasp](https://github.com/google/clasp).
 
 ### Preparar un equipo nuevo
-1. Instalar Node.js 18+ y clasp: `npm install -g @google/clasp`.
-2. Autenticarse con una cuenta con permisos de edición sobre el proyecto de Apps Script: `clasp login`.
-3. Clonar el repositorio. No hay build ni dependencias locales.
+1. Instalar Node.js 20.19+ (o 22.13+/24+).
+2. Clonar el repositorio e instalar las dependencias: `npm ci` (o `npm install` la primera vez).
+3. Autenticarse con una cuenta con permisos de edición sobre el proyecto de Apps Script: `npm run login`.
 
-El archivo `.clasp.json` está versionado: solo contiene el `scriptId` del proyecto y el directorio raíz, **no credenciales**. Gracias a ello, `clasp push` funciona desde cualquier equipo tras hacer `clasp login`.
+Las versiones de `clasp` y ESLint quedan fijadas por `package.json` + `package-lock.json`, así que todos los equipos usan las mismas herramientas.
+
+El archivo `.clasp.json` está versionado: solo contiene el `scriptId` del proyecto y el directorio raíz, **no credenciales**. Gracias a ello, `npm run push` funciona desde cualquier equipo tras hacer `npm run login`.
 
 ### Comandos habituales
 ```bash
-clasp status                    # muestra qué archivos se subirán
-clasp push                      # sube Code.gs, index.html, css.html, javascript.html y appsscript.json
-clasp deployments               # lista los despliegues y sus IDs
-clasp deploy -i <deploymentId> -d "descripción"  # publica el código actual en un despliegue existente
-clasp open                      # abre el proyecto en el editor de Apps Script
+npm run status       # muestra qué archivos se subirán
+npm run push         # sube Code.gs, index.html, css.html, javascript.html y appsscript.json
+npm run deployments  # lista los despliegues y sus IDs
+npm run deploy -- -i <deploymentId> -d "descripción"  # publica el código actual en un despliegue existente
+npm run open         # abre el proyecto en el editor de Apps Script
+npm run lint         # analiza Code.gs y el JS de javascript.html con ESLint
 ```
 
-> `clasp push` actualiza el código del proyecto, pero la URL `/exec` sigue sirviendo la última versión desplegada. Después de cada push hay que publicar una nueva versión (con `clasp deploy -i <deploymentId>` o desde *Implementar → Gestionar implementaciones*).
+> `npm run push` actualiza el código del proyecto, pero la URL `/exec` sigue sirviendo la última versión desplegada. Después de cada push hay que publicar una nueva versión (con `npm run deploy -- -i <deploymentId>` o desde *Implementar → Gestionar implementaciones*).
+
+### Lint
+`npm run lint` copia `Code.gs` a `.tmp/`, extrae el bloque `<script>` de `javascript.html` y ejecuta ESLint con los globals de navegador y de Apps Script. No modifica el código ni se sube a Apps Script; `.tmp/` está en `.gitignore`.
 
 ### Indicador de versión
 El panel lateral muestra, en la parte inferior, la versión del código (`APP_VERSION` en `Code.gs`) y el canal de ejecución. Como `/dev` sirve siempre el último push y `/exec` sirve la última versión publicada, el indicador permite saber de un vistazo qué código estás probando.

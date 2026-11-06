@@ -1,0 +1,23 @@
+{
+  "name": "panel-dedicacion-no-lectiva",
+  "private": true,
+  "description": "Panel de gestión de dedicación no lectiva (Google Apps Script)",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  },
+  "scripts": {
+    "login": "clasp login",
+    "status": "clasp status",
+    "push": "clasp push --force",
+    "deployments": "clasp deployments",
+    "deploy": "clasp deploy",
+    "open": "clasp open",
+    "lint": "node scripts/lint.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@google/clasp": "3.3.0",
+    "eslint": "^10.0.0",
+    "globals": "^17.0.0"
+  }
+}
