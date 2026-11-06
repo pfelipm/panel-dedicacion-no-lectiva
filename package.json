@@ -1,5 +1,6 @@
 {
   "name": "panel-dedicacion-no-lectiva",
+  "version": "1.0.0",
   "private": true,
   "description": "Panel de gestión de dedicación no lectiva (Google Apps Script)",
   "engines": {

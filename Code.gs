@@ -14,7 +14,7 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.0.0";
 
 // Logo por defecto si Ajustes!E2 está vacío o no contiene una URL válida.
 const APP_LOGO_FALLBACK = "https://drive.google.com/thumbnail?id=1L1bN-w8xzyqWul07ePiEuBvxP7Z83a30";
