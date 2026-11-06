@@ -27,7 +27,7 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 
 ### 2. Gestión de roles y permisos
 *   **Docente**: Acceso a su propio horario y estadísticas personales, además de la vista global del claustro.
-*   **Administrador**: Capacidad para ver y modificar el horario de cualquier docente, acceso a herramientas de supervisión y configuración.
+*   **Administrador**: Capacidad para ver y modificar el horario de cualquier docente y acceso a las herramientas de supervisión. La configuración (roles, tipos de sesión y grupos) se gestiona directamente en la pestaña `Ajustes` de la hoja.
 *   **Lector**: Acceso en solo lectura a la vista global.
 
 > La vista global es visible para **todo el profesorado autorizado**: su objetivo es que el claustro sepa quién tiene guardias, tutorías o está en horario de gestión. Por ello, las observaciones de cada sesión también son visibles para el resto de docentes en los tooltips.
