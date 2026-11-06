@@ -12,6 +12,10 @@ const SHEET_NAMES = {
   RECORDS: "Horario no lectivo"
 };
 
+// --- VERSIÓN DE LA APP ---
+// Se muestra en el panel lateral. Actualizar al publicar cambios.
+const APP_VERSION = "1.1.0";
+
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
   debug: false,
@@ -20,7 +24,19 @@ const DEBUG_CONFIG = {
 
 // --- SERVING WEBAPP ---
 function doGet(e) {
-  return HtmlService.createTemplateFromFile('index')
+  const template = HtmlService.createTemplateFromFile('index');
+
+  // Canal de ejecución (dev/prod) para el indicador de versión.
+  // Se puede forzar con ?canal=dev o ?canal=prod en la URL.
+  const rawCanal = e && e.parameter ? e.parameter.canal : "";
+  const canal = ["dev", "prod", "exec"].includes(String(rawCanal).toLowerCase())
+    ? String(rawCanal).toLowerCase()
+    : "";
+  template.canal = canal;
+  template.canalLabel = canal || '—';
+  template.appVersion = APP_VERSION;
+
+  return template
     .evaluate()
     .setTitle('Gestión Dedicación No Lectiva')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
@@ -201,13 +217,28 @@ function saveSession(sessionData) {
     }
   }
 
-  // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA
+  // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA (por rango, no solo por hora de inicio)
   // Solo los administradores pueden guardar sesiones que solapen con lectivas
   const teacherProfile = getTeacherProfile(ss, sessionData.email);
   if (teacherProfile) {
     const teachingClasses = getTeachingClasses(ss, teacherProfile.code);
-    const hasOverlap = teachingClasses.some(c => c.day === sessionData.day && c.start === sessionData.start);
-    
+    const newStart = timeToMinutes(sessionData.start);
+    const newEnd = timeToMinutes(sessionData.end);
+
+    const hasOverlap = teachingClasses.some(c => {
+      if (c.day !== sessionData.day) return false;
+
+      const classStart = timeToMinutes(c.start);
+      const classEnd = timeToMinutes(c.end);
+
+      // Fallback a comparación exacta si alguna hora no es parseable
+      if (newStart === null || newEnd === null || classStart === null || classEnd === null) {
+        return c.start === sessionData.start;
+      }
+
+      return newStart < classEnd && newEnd > classStart;
+    });
+
     if (hasOverlap && !isAdmin) {
       throw new Error("No tienes permisos para registrar sesiones no lectivas superpuestas a clases regulares. Esta acción requiere autorización de administración.");
     }
@@ -423,45 +454,41 @@ function extractScheduleSlots(ss) {
   // Ignorar cabecera
   const rows = data.slice(1);
 
-  // Usamos un Map para unificar slots por hora inicio-fin
-  // Key: "HH:mm-HH:mm"
+  // Un slot por DÍA y franja horaria: el descanso puede variar entre días.
+  // Key: "Día|HH:mm-HH:mm"
   const slotsMap = new Map();
 
   rows.forEach(row => {
-    const day = row[1]; // B
-    const start = row[5]; // F (Objeto Date o String HH:mm)
-    const end = row[6];   // G
+    const day = row[1] ? String(row[1]).trim() : ""; // B
+    const start = formatTime(row[5]); // F (Objeto Date o String HH:mm)
+    const end = formatTime(row[6]);   // G
     const hasModule = row[2] && row[2] !== ""; // C
     const hasTeacher = row[3] && row[3] !== ""; // D
 
     if (!day || !start || !end) return;
 
-    // Formatear horas a HH:mm
-    const timeStr = `${formatTime(start)}-${formatTime(end)}`;
+    const key = `${day}|${start}-${end}`;
 
-    // Determinar si es slot lectivo o descanso
-    // Según usuario: Si NO tiene módulo ni docente, es descanso/hueco
+    // Si NO tiene módulo ni docente, es descanso/hueco.
+    // Si alguna fila del mismo día y franja tiene clase, prevalece CLASS.
     const isBreak = !hasModule && !hasTeacher;
 
-    // Guardamos la definición del slot. 
-    // Si ya existe, priorizamos marcarlo como 'CLASS' si alguna vez aparece como clase.
-    // (A veces un slot es clase para unos y libre para otros, pero el slot 'existe' como lectivo).
-    if (!slotsMap.has(timeStr)) {
-      slotsMap.set(timeStr, {
-        start: formatTime(start),
-        end: formatTime(end),
+    if (!slotsMap.has(key)) {
+      slotsMap.set(key, {
+        day: day,
+        start: start,
+        end: end,
         type: isBreak ? 'BREAK' : 'CLASS'
       });
-    } else {
-      // Si ya existe y el que tenemos es BREAK pero ahora vemos que SÍ es clase en otra fila, actualizamos
-      if (slotsMap.get(timeStr).type === 'BREAK' && !isBreak) {
-        slotsMap.get(timeStr).type = 'CLASS';
-      }
+    } else if (slotsMap.get(key).type === 'BREAK' && !isBreak) {
+      slotsMap.get(key).type = 'CLASS';
     }
   });
 
-  // Convertir a array y ordenar
-  return Array.from(slotsMap.values()).sort((a, b) => a.start.localeCompare(b.start));
+  // Convertir a array y ordenar por hora (y día como desempate)
+  return Array.from(slotsMap.values()).sort((a, b) =>
+    a.start.localeCompare(b.start) || a.day.localeCompare(b.day)
+  );
 }
 
 function getTeachingClasses(ss, teacherCode) {
@@ -507,6 +534,18 @@ function formatTime(dateObj) {
     return `${h}:${m}`;
   }
   return dateObj; // Asumimos string si no es Date
+}
+
+// Convierte "HH:mm" (o Date) a minutos desde medianoche. Devuelve null si no es válido.
+function timeToMinutes(value) {
+  const str = formatTime(value);
+  if (typeof str !== 'string') return null;
+  const parts = str.split(':');
+  if (parts.length !== 2) return null;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
 }
 
 function getAllTeachers(ss, includeMeta) {

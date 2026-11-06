@@ -89,6 +89,7 @@
         renderScheduleGrid();
         updateStats();
         renderLastUpdate();
+        renderVersion();
 
         // Ocultar loading
         document.getElementById('loading')?.classList.add('fade-out');
@@ -240,6 +241,41 @@
             console.error("Error al renderizar última actualización:", e);
             container.classList.add('hidden');
         }
+    }
+
+    // --- INDICADOR DE VERSIÓN ---
+
+    function renderVersion() {
+        const versionEl = document.getElementById('app-version');
+        const channelEl = document.getElementById('app-channel');
+        if (!versionEl || !channelEl) return;
+
+        const version = (document.body.dataset.appVersion || '').trim();
+        versionEl.textContent = version ? `v${version}` : 'v—';
+
+        const channel = detectChannel();
+        channelEl.textContent = channel || '—';
+        channelEl.className = 'px-1.5 py-0.5 rounded font-semibold uppercase tracking-wide ' +
+            (channel === 'dev'
+                ? 'bg-amber-100 text-amber-700'
+                : channel === 'prod'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-slate-100 text-slate-500');
+    }
+
+    /**
+     * Canal de ejecución. Prioriza ?canal=dev|prod (inyectado por el servidor)
+     * y, si no está, intenta deducirlo del referrer.
+     */
+    function detectChannel() {
+        const fromServer = (document.body.dataset.canal || '').trim().toLowerCase();
+        if (fromServer === 'dev') return 'dev';
+        if (fromServer === 'prod' || fromServer === 'exec') return 'prod';
+
+        const ref = document.referrer || '';
+        if (/\/dev(?:[?#/]|$)/.test(ref)) return 'dev';
+        if (/\/exec(?:[?#/]|$)/.test(ref)) return 'prod';
+        return '';
     }
 
     function switchTeacher(email) {
@@ -427,7 +463,7 @@
                     renderInteractiveCell(td, day, slot.start, slot.end, myRecord);
                 } else {
                     // -- SLOT VACÍO O DESCANSO --
-                    const scheduleItem = AppState.schedule.find(s => s.day === day && s.start === slot.start);
+                    const scheduleItem = AppState.schedule.find(s => s.day === day && s.start === slot.start && s.end === slot.end);
                     const isBreak = scheduleItem ? scheduleItem.type === 'BREAK' : false;
 
                     if (isBreak) {

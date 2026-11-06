@@ -65,11 +65,21 @@ El archivo `.clasp.json` está versionado: solo contiene el `scriptId` del proye
 clasp status                    # muestra qué archivos se subirán
 clasp push                      # sube Code.gs, index.html, css.html, javascript.html y appsscript.json
 clasp deployments               # lista los despliegues y sus IDs
-clasp deploy -d <deploymentId>  # publica el código actual en un despliegue existente
+clasp deploy -i <deploymentId> -d "descripción"  # publica el código actual en un despliegue existente
 clasp open                      # abre el proyecto en el editor de Apps Script
 ```
 
-> `clasp push` actualiza el código del proyecto, pero la URL `/exec` sigue sirviendo la última versión desplegada. Después de cada push hay que publicar una nueva versión (con `clasp deploy -d <id>` o desde *Implementar → Gestionar implementaciones*).
+> `clasp push` actualiza el código del proyecto, pero la URL `/exec` sigue sirviendo la última versión desplegada. Después de cada push hay que publicar una nueva versión (con `clasp deploy -i <deploymentId>` o desde *Implementar → Gestionar implementaciones*).
+
+### Indicador de versión
+El panel lateral muestra, en la parte inferior, la versión del código (`APP_VERSION` en `Code.gs`) y el canal de ejecución. Como `/dev` sirve siempre el último push y `/exec` sirve la última versión publicada, el indicador permite saber de un vistazo qué código estás probando.
+
+Para que el canal sea inequívoco, añade el parámetro a tus marcadores:
+
+- Desarrollo: `.../dev?canal=dev`
+- Producción: `.../exec?canal=prod`
+
+Si no se indica el parámetro, se intenta deducir del referrer. Recuerda subir `APP_VERSION` cada vez que publiques cambios.
 
 ### Credenciales
 `clasp login` guarda el token en `~/.clasprc.json`, fuera del repositorio. No lo copies ni lo subas: cada equipo debe autenticarse por separado (`.clasprc.json` está en `.gitignore`).

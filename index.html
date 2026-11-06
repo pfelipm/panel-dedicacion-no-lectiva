@@ -13,7 +13,8 @@
   <?!= include('css'); ?>
 </head>
 
-<body class="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden">
+<body class="bg-slate-50 text-slate-900 font-sans h-screen flex flex-col overflow-hidden"
+  data-canal="<?= canal ?>" data-app-version="<?= appVersion ?>">
 
   <!-- LOADING OVERLAY (Initial) -->
   <div id="loading" class="fixed inset-0 bg-white/80 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
@@ -76,6 +77,12 @@
         </div>
       </nav>
 
+      <!-- INDICADOR DE VERSIÓN (discreto) -->
+      <div class="mt-auto px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+        <span id="app-version" title="Versión del código en ejecución">v<?= appVersion ?></span>
+        <span id="app-channel"
+          class="px-1.5 py-0.5 rounded bg-slate-100 font-semibold uppercase tracking-wide"><?= canalLabel ?></span>
+      </div>
 
     </aside>
 
