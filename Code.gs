@@ -14,7 +14,7 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.1.3";
 
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
@@ -204,11 +204,16 @@ function logAudit(actorEmail, targetEmail, action, sessionData) {
 function saveSession(sessionData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.RECORDS);
-  const userEmail = getCurrentUserEmail();
+  const requesterEmail = getCurrentUserEmail();
 
   // Validaciones básicas de seguridad
-  const requesterEmail = userEmail;
-  const isAdmin = checkAdmin(ss, requesterEmail);
+  const access = assertAuthorized(ss, requesterEmail);
+  const isAdmin = access.isAdmin;
+
+  // Los lectores (sin perfil docente) son de solo lectura
+  if (access.isReader && !access.profile && !isAdmin) {
+    throw new Error("Tu perfil es de solo lectura.");
+  }
 
   // Si intenta guardar para otro, verificamos si es admin
   if (sessionData.email !== requesterEmail) {
@@ -219,7 +224,9 @@ function saveSession(sessionData) {
 
   // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA (por rango, no solo por hora de inicio)
   // Solo los administradores pueden guardar sesiones que solapen con lectivas
-  const teacherProfile = getTeacherProfile(ss, sessionData.email);
+  const teacherProfile = (sessionData.email === requesterEmail)
+    ? access.profile
+    : getTeacherProfile(ss, sessionData.email);
   if (teacherProfile) {
     const teachingClasses = getTeachingClasses(ss, teacherProfile.code);
     const newStart = timeToMinutes(sessionData.start);
@@ -289,7 +296,7 @@ function saveSession(sessionData) {
       if (!firstCellVal || firstCellVal === "") {
         sheet.getRange(2, 1, 1, 7).setValues([valuesToSave]);
         // Log audit for initial insert too
-        logAudit(userEmail, sessionData.email, "CREAR", sessionData);
+        logAudit(requesterEmail, sessionData.email, "CREAR", sessionData);
         return { success: true };
       }
     }
@@ -298,7 +305,7 @@ function saveSession(sessionData) {
   }
 
   // AUDIT LOG
-  logAudit(userEmail, sessionData.email, auditAction, sessionData);
+  logAudit(requesterEmail, sessionData.email, auditAction, sessionData);
 
   return { 
     success: true,
@@ -315,11 +322,16 @@ function deleteSession(sessionData) {
   const requesterEmail = getCurrentUserEmail();
 
   // 1. Validar Permisos
-  if (sessionData.email !== requesterEmail) {
-    const isAdmin = checkAdmin(ss, requesterEmail);
-    if (!isAdmin) {
-      throw new Error("No puedes eliminar sesiones de otro usuario.");
-    }
+  const access = assertAuthorized(ss, requesterEmail);
+  const isAdmin = access.isAdmin;
+
+  // Los lectores (sin perfil docente) son de solo lectura
+  if (access.isReader && !access.profile && !isAdmin) {
+    throw new Error("Tu perfil es de solo lectura.");
+  }
+
+  if (sessionData.email !== requesterEmail && !isAdmin) {
+    throw new Error("No puedes eliminar sesiones de otro usuario.");
   }
 
   // 2. Buscar fila a eliminar
