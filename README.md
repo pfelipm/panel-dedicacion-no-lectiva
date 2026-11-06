@@ -8,6 +8,7 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 ## 🛠️ Detalles técnicos
 *   **Backend**: Google Apps Script (GAS) vinculado a Google Sheets.
 *   **Despliegue**: Webapp restringida a los usuarios del dominio del centro (`access: DOMAIN`).
+*   **Validación**: el servidor comprueba tipo, día, franja y grupo; `LockService` evita escrituras concurrentes.
 *   **Frontend**: HTML5, JavaScript (ES6+), **Tailwind CSS** para el diseño responsivo y **Phosphor Icons**.
 *   **Base de datos**: Google Sheets (5 pestañas principales):
     *   `Resumen HS`: Perfiles docentes, códigos y metas horarias.

@@ -14,7 +14,7 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.2.0";
 
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
@@ -199,6 +199,76 @@ function logAudit(actorEmail, targetEmail, action, sessionData) {
 }
 
 /**
+ * Valida y normaliza los datos de una sesión no lectiva.
+ * Devuelve { day, start, end, type, group } o lanza un error.
+ */
+function validateSessionData(ss, sessionData, teacherProfile, isAdmin) {
+  const config = getAppConfig(ss);
+
+  // Tipo de actividad: debe existir en Ajustes!A
+  const typeInput = String(sessionData.type || "").trim().toLowerCase();
+  const canonicalType = config.sessionTypes.find(t =>
+    String(t).trim().toLowerCase() === typeInput
+  );
+  if (!canonicalType) {
+    throw new Error("Tipo de actividad no válido.");
+  }
+
+  // Día: debe ser uno de los días lectivos
+  const canonicalDay = normalizeDay(sessionData.day);
+  const validDays = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+  if (!validDays.includes(canonicalDay)) {
+    throw new Error("Día no válido.");
+  }
+
+  // Franja horaria
+  const startMin = timeToMinutes(sessionData.start);
+  const endMin = timeToMinutes(sessionData.end);
+  if (startMin === null || endMin === null || startMin >= endMin) {
+    throw new Error("Franja horaria no válida.");
+  }
+
+  // Grupo: obligatorio y restringido para tutorías
+  const isTutoria = canonicalType.toLowerCase().includes("tutoría");
+  const groupInput = String(sessionData.group || "").trim();
+  let canonicalGroup = "";
+
+  if (isTutoria) {
+    if (!groupInput) {
+      throw new Error("Selecciona un grupo para la tutoría.");
+    }
+
+    const allowedGroups = teacherProfile
+      ? String(teacherProfile.metas.tutoria || "")
+          .split(/[\s,;]+/)
+          .map(g => g.trim())
+          .filter(g => g && g.toLowerCase() !== "no")
+      : [];
+
+    if (allowedGroups.length === 0) {
+      if (!isAdmin) {
+        throw new Error("No tienes grupos de tutoría asignados.");
+      }
+      canonicalGroup = groupInput;
+    } else {
+      const match = allowedGroups.find(g => g.toLowerCase() === groupInput.toLowerCase());
+      if (!match) {
+        throw new Error("El grupo seleccionado no está asignado a este docente.");
+      }
+      canonicalGroup = match;
+    }
+  }
+
+  return {
+    day: canonicalDay,
+    start: minutesToTime(startMin),
+    end: minutesToTime(endMin),
+    type: canonicalType,
+    group: canonicalGroup
+  };
+}
+
+/**
  * Guarda una nueva sesión no lectiva
  */
 function saveSession(sessionData) {
@@ -222,95 +292,124 @@ function saveSession(sessionData) {
     }
   }
 
-  // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA (por rango, no solo por hora de inicio)
-  // Solo los administradores pueden guardar sesiones que solapen con lectivas
   const teacherProfile = (sessionData.email === requesterEmail)
     ? access.profile
     : getTeacherProfile(ss, sessionData.email);
-  if (teacherProfile) {
-    const teachingClasses = getTeachingClasses(ss, teacherProfile.code);
-    const newStart = timeToMinutes(sessionData.start);
-    const newEnd = timeToMinutes(sessionData.end);
 
-    const hasOverlap = teachingClasses.some(c => {
-      if (c.day !== sessionData.day) return false;
+  if (!teacherProfile) {
+    throw new Error("Docente no encontrado.");
+  }
 
-      const classStart = timeToMinutes(c.start);
-      const classEnd = timeToMinutes(c.end);
+  // Validar y normalizar tipo, día, franja y grupo
+  const validated = validateSessionData(ss, sessionData, teacherProfile, isAdmin);
+  sessionData.day = validated.day;
+  sessionData.start = validated.start;
+  sessionData.end = validated.end;
+  sessionData.type = validated.type;
+  sessionData.group = validated.group;
 
-      // Fallback a comparación exacta si alguna hora no es parseable
-      if (newStart === null || newEnd === null || classStart === null || classEnd === null) {
-        return c.start === sessionData.start;
-      }
+  const newStart = timeToMinutes(sessionData.start);
+  const newEnd = timeToMinutes(sessionData.end);
 
-      return newStart < classEnd && newEnd > classStart;
+  // VALIDACIÓN DE SOLAPAMIENTO CON CLASE LECTIVA (por rango)
+  // Solo los administradores pueden guardar sesiones que solapen con lectivas
+  const teachingClasses = getTeachingClasses(ss, teacherProfile.code);
+  const hasClassOverlap = teachingClasses.some(c => {
+    if (c.day !== sessionData.day) return false;
+
+    const classStart = timeToMinutes(c.start);
+    const classEnd = timeToMinutes(c.end);
+
+    // Fallback a comparación exacta si alguna hora no es parseable
+    if (newStart === null || newEnd === null || classStart === null || classEnd === null) {
+      return c.start === sessionData.start;
+    }
+
+    return newStart < classEnd && newEnd > classStart;
+  });
+
+  if (hasClassOverlap && !isAdmin) {
+    throw new Error("No tienes permisos para registrar sesiones no lectivas superpuestas a clases regulares. Esta acción requiere autorización de administración.");
+  }
+
+  // Sección crítica: lectura + escritura de la hoja de registros
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const lastRow = sheet.getLastRow();
+
+    const valuesToSave = [
+      sessionData.email,
+      sessionData.day,
+      sessionData.start,
+      sessionData.end,
+      sessionData.type,
+      sessionData.group || "",
+      sessionData.notes || ""
+    ];
+
+    // Upsert: clave única Email + Día + Hora Inicio
+    const data = sheet.getDataRange().getValues();
+
+    // Solapamiento con otras sesiones no lectivas del mismo docente
+    const hasRecordOverlap = data.slice(1).some(row => {
+      if (!row[0] || row[0] !== sessionData.email) return false;
+      if (normalizeDay(row[1]) !== sessionData.day) return false;
+      if (formatTime(row[2]) === sessionData.start) return false; // fila que se actualizará
+
+      const rowStart = timeToMinutes(row[2]);
+      const rowEnd = timeToMinutes(row[3]);
+      if (rowStart === null || rowEnd === null) return false;
+
+      return newStart < rowEnd && newEnd > rowStart;
     });
 
-    if (hasOverlap && !isAdmin) {
-      throw new Error("No tienes permisos para registrar sesiones no lectivas superpuestas a clases regulares. Esta acción requiere autorización de administración.");
+    if (hasRecordOverlap) {
+      throw new Error("Ya existe otra sesión no lectiva que se solapa con esta franja.");
     }
-  }
 
-  // Validar solapamientos (Lógica de negocio robusta necesaria aquí o en front)
-  // De momento guardamos appendRow
-  // De momento guardamos appendRow -> CAMBIO: Verificar si la fila 2 está vacía para reusarla
-  const lastRow = sheet.getLastRow();
-  const rangeFirst = sheet.getRange(2, 1, 1, 6); // Rango de la primera fila de datos (asumiendo 6 cols)
+    let rowIndexToUpdate = -1;
 
-  const valuesToSave = [
-    sessionData.email,
-    sessionData.day,
-    sessionData.start,
-    sessionData.end,
-    sessionData.type,
-    sessionData.group || "",
-    sessionData.notes || ""
-  ];
-
-  // UPGRADE: Upsert Logic (Buscar si ya existe para actualizar)
-  // Clave única: Email + Día + Hora Inicio
-  const data = sheet.getDataRange().getValues();
-  let rowIndexToUpdate = -1;
-
-  // Empezamos en i=1 para saltar cabecera
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    // row[0]=email, row[1]=day, row[2]=start
-    if (row[0] === sessionData.email && row[1] === sessionData.day && formatTime(row[2]) === sessionData.start) {
-      rowIndexToUpdate = i + 1; // 1-based index for getRange
-      break;
-    }
-  }
-
-  let auditAction = "CREAR";
-
-  if (rowIndexToUpdate > 0) {
-    // Actualizar existente
-    sheet.getRange(rowIndexToUpdate, 1, 1, 7).setValues([valuesToSave]);
-    auditAction = "ACTUALIZAR";
-  } else {
-    // Insertar nuevo (Append)
-    // Verificar si la fila 2 está vacía (caso inicial) para reusarla
-    if (lastRow === 2) {
-      const firstCellVal = sheet.getRange(2, 1).getValue();
-      if (!firstCellVal || firstCellVal === "") {
-        sheet.getRange(2, 1, 1, 7).setValues([valuesToSave]);
-        // Log audit for initial insert too
-        logAudit(requesterEmail, sessionData.email, "CREAR", sessionData);
-        return { success: true };
+    // Empezamos en i=1 para saltar cabecera
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (row[0] === sessionData.email && normalizeDay(row[1]) === sessionData.day && formatTime(row[2]) === sessionData.start) {
+        rowIndexToUpdate = i + 1; // 1-based index for getRange
+        break;
       }
     }
-    sheet.appendRow(valuesToSave);
-    auditAction = "CREAR";
+
+    let auditAction = "CREAR";
+
+    if (rowIndexToUpdate > 0) {
+      // Actualizar existente
+      sheet.getRange(rowIndexToUpdate, 1, 1, 7).setValues([valuesToSave]);
+      auditAction = "ACTUALIZAR";
+    } else {
+      // Insertar nuevo. Si la hoja solo tiene cabecera y una fila vacía, reutilizarla.
+      if (lastRow === 2) {
+        const firstCellVal = sheet.getRange(2, 1).getValue();
+        if (!firstCellVal || firstCellVal === "") {
+          sheet.getRange(2, 1, 1, 7).setValues([valuesToSave]);
+          logAudit(requesterEmail, sessionData.email, "CREAR", sessionData);
+          return { success: true, lastUpdate: getLastUpdateForUser(ss, sessionData.email) };
+        }
+      }
+      sheet.appendRow(valuesToSave);
+      auditAction = "CREAR";
+    }
+
+    // AUDIT LOG
+    logAudit(requesterEmail, sessionData.email, auditAction, sessionData);
+
+    return {
+      success: true,
+      lastUpdate: getLastUpdateForUser(ss, sessionData.email)
+    };
+  } finally {
+    lock.releaseLock();
   }
-
-  // AUDIT LOG
-  logAudit(requesterEmail, sessionData.email, auditAction, sessionData);
-
-  return { 
-    success: true,
-    lastUpdate: getLastUpdateForUser(ss, sessionData.email)
-  };
 }
 
 /**
@@ -334,53 +433,48 @@ function deleteSession(sessionData) {
     throw new Error("No puedes eliminar sesiones de otro usuario.");
   }
 
-  // 2. Buscar fila a eliminar
-  // Asumimos que la combinación Email + Día + StartTime es única
-  const data = sheet.getDataRange().getValues();
-  // data[0] headers
+  // 2. Buscar fila a eliminar (con bloqueo para evitar carreras)
+  const targetStartStr = formatTime(sessionData.start);
+  const targetDay = normalizeDay(sessionData.day);
 
-  // Indices (Ajustar según appendRow: Email, Day, Start, End, Type, Group)
-  // 0: Email, 1: Day, 2: Start, 3: End...
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-  // Importante: StartTime puede venir como string HH:mm o Date object.
-  // En sheet.appendRow guardamos lo que llega.
-  // En extractScheduleSlots (lectura de Clases) usaba formatTime.
-  // En saveSession (lectura de Records) usaba formatTime.
-  // Asegurar comparación robusta de tiempo.
+  try {
+    const data = sheet.getDataRange().getValues();
 
-  const targetStartStr = String(sessionData.start);
+    // Empezamos búsqueda desde fila 2 (índice 1) -> Row Index = i + 1
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowEmail = row[0];
+      const rowDay = normalizeDay(row[1]);
+      const rowStart = formatTime(row[2]);
 
-  // Empezamos búsqueda desde fila 2 (índice 1) -> Row Index = i + 1
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const rowEmail = row[0];
-    const rowDay = row[1];
-    const rowStart = formatTime(row[2]); // Helper para uniformizar
+      if (rowEmail === sessionData.email && rowDay === targetDay && rowStart === targetStartStr) {
+        // Upgrade: Audit Log
+        logAudit(requesterEmail, sessionData.email, "ELIMINAR", sessionData);
 
-    if (rowEmail === sessionData.email && rowDay === sessionData.day && rowStart === targetStartStr) {
-      // Encontrado -> Eliminar
+        const lastRow = sheet.getLastRow();
+        const rowIndex = i + 1; // 1-indexed
 
-      // Upgrade: Audit Log
-      logAudit(requesterEmail, sessionData.email, "ELIMINAR", sessionData);
+        // Si es la fila 2 y es la ÚNICA fila de datos, no borrar fila, borrar contenido
+        if (rowIndex === 2 && lastRow === 2) {
+          sheet.getRange(2, 1, 1, 7).clearContent(); // 7 columnas (incluye notas)
+        } else {
+          sheet.deleteRow(rowIndex);
+        }
 
-      const lastRow = sheet.getLastRow();
-      const rowIndex = i + 1; // 1-indexed
-
-      // Si es la fila 2 y es la ÚNICA fila de datos, no borrar fila, borrar contenido
-      if (rowIndex === 2 && lastRow === 2) {
-        sheet.getRange(2, 1, 1, 7).clearContent(); // 7 columnas (incluye notas)
-      } else {
-        sheet.deleteRow(rowIndex);
+        return {
+          success: true,
+          lastUpdate: getLastUpdateForUser(ss, sessionData.email)
+        };
       }
-
-      return { 
-        success: true,
-        lastUpdate: getLastUpdateForUser(ss, sessionData.email)
-      };
     }
-  }
 
-  throw new Error("Sesión no encontrada para eliminar.");
+    throw new Error("Sesión no encontrada para eliminar.");
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 
@@ -471,7 +565,7 @@ function extractScheduleSlots(ss) {
   const slotsMap = new Map();
 
   rows.forEach(row => {
-    const day = row[1] ? String(row[1]).trim() : ""; // B
+    const day = row[1] ? normalizeDay(row[1]) : ""; // B
     const start = formatTime(row[5]); // F (Objeto Date o String HH:mm)
     const end = formatTime(row[6]);   // G
     const hasModule = row[2] && row[2] !== ""; // C
@@ -512,7 +606,7 @@ function getTeachingClasses(ss, teacherCode) {
   return rows
     .filter(row => row[3] === teacherCode)
     .map(row => ({
-      day: row[1], // Día
+      day: normalizeDay(row[1]), // Día
       start: formatTime(row[5]),
       end: formatTime(row[6]),
       group: row[0],
@@ -529,7 +623,7 @@ function getTeacherRecords(ss, email) {
     .filter(row => row[0] === email)
     .map(row => ({
       email: row[0],
-      day: row[1],
+      day: normalizeDay(row[1]),
       start: formatTime(row[2]),
       end: formatTime(row[3]),
       type: row[4],
@@ -538,14 +632,23 @@ function getTeacherRecords(ss, email) {
     }));
 }
 
-// Helper simple para horas
-function formatTime(dateObj) {
-  if (dateObj instanceof Date) {
-    const h = dateObj.getHours().toString().padStart(2, '0');
-    const m = dateObj.getMinutes().toString().padStart(2, '0');
+// Helper simple para horas. Normaliza Date y cadenas tipo "9:00" a "HH:mm".
+function formatTime(value) {
+  if (value instanceof Date) {
+    const h = value.getHours().toString().padStart(2, '0');
+    const m = value.getMinutes().toString().padStart(2, '0');
     return `${h}:${m}`;
   }
-  return dateObj; // Asumimos string si no es Date
+  if (typeof value === 'string') {
+    const match = value.trim().match(/^(\d{1,2}):(\d{1,2})$/);
+    if (match) {
+      const h = match[1].padStart(2, '0');
+      const m = match[2].padStart(2, '0');
+      return `${h}:${m}`;
+    }
+    return value.trim();
+  }
+  return value; // números u otros: se devuelven tal cual
 }
 
 // Convierte "HH:mm" (o Date) a minutos desde medianoche. Devuelve null si no es válido.
@@ -558,6 +661,25 @@ function timeToMinutes(value) {
   const m = parseInt(parts[1], 10);
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
+}
+
+// Convierte minutos desde medianoche a "HH:mm".
+function minutesToTime(minutes) {
+  const h = Math.floor(minutes / 60).toString().padStart(2, '0');
+  const m = (minutes % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+// Normaliza el nombre del día a la forma usada en la app.
+function normalizeDay(value) {
+  const days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
+  const clean = s => String(s || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const input = clean(value);
+  return days.find(d => clean(d) === input) || String(value || "").trim();
 }
 
 function getAllTeachers(ss, includeMeta) {
@@ -654,7 +776,7 @@ function readAllNonTeachingRecords(ss) {
     .filter(row => row[0]) // Ignorar filas vacías (p. ej. tras borrar el último registro)
     .map(row => ({
       email: row[0],
-      day: row[1],
+      day: normalizeDay(row[1]),
       start: formatTime(row[2]),
       end: formatTime(row[3]),
       type: row[4],
