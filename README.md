@@ -83,6 +83,9 @@ Para que el canal sea inequívoco, añade el parámetro a tus marcadores:
 
 Si no se indica el parámetro, se intenta deducir del referrer. Recuerda subir `APP_VERSION` cada vez que publiques cambios.
 
+### Embebido y X-Frame-Options
+La webapp se sirve con `XFrameOptionsMode.ALLOWALL` (`Code.gs`) para permitir incrustarla en otra página, por ejemplo la intranet del centro. Esto también permite que cualquier web la embeba, con el consiguiente riesgo de clickjacking; se asume de forma consciente porque el uso previsto puede requerir el embebido. Si en el futuro deja de ser necesario, cambiar a `HtmlService.XFrameOptionsMode.DEFAULT`.
+
 ### Credenciales
 `clasp login` guarda el token en `~/.clasprc.json`, fuera del repositorio. No lo copies ni lo subas: cada equipo debe autenticarse por separado (`.clasprc.json` está en `.gitignore`).
 

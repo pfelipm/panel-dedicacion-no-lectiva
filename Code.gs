@@ -36,6 +36,10 @@ function doGet(e) {
   template.canalLabel = canal || '—';
   template.appVersion = APP_VERSION;
 
+  // ALLOWALL permite embeber la webapp en otra página (p. ej. la intranet del
+  // centro). Se mantiene de forma consciente porque el uso previsto puede
+  // requerir el embebido. Si deja de necesitarse, usar XFrameOptionsMode.DEFAULT
+  // para evitar clickjacking.
   return template
     .evaluate()
     .setTitle('Gestión Dedicación No Lectiva')
