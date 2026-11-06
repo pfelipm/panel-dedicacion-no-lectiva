@@ -49,6 +49,31 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 *   Muestra la **fecha, hora y autor de la última modificación** en cada ficha horaria.
 *   Sistema de auditoría automático que registra cada cambio en el backend.
 
+## 💻 Desarrollo y despliegue
+
+El proyecto se gestiona con [clasp](https://github.com/google/clasp).
+
+### Preparar un equipo nuevo
+1. Instalar Node.js 18+ y clasp: `npm install -g @google/clasp`.
+2. Autenticarse con una cuenta con permisos de edición sobre el proyecto de Apps Script: `clasp login`.
+3. Clonar el repositorio. No hay build ni dependencias locales.
+
+El archivo `.clasp.json` está versionado: solo contiene el `scriptId` del proyecto y el directorio raíz, **no credenciales**. Gracias a ello, `clasp push` funciona desde cualquier equipo tras hacer `clasp login`.
+
+### Comandos habituales
+```bash
+clasp status                    # muestra qué archivos se subirán
+clasp push                      # sube Code.gs, index.html, css.html, javascript.html y appsscript.json
+clasp deployments               # lista los despliegues y sus IDs
+clasp deploy -d <deploymentId>  # publica el código actual en un despliegue existente
+clasp open                      # abre el proyecto en el editor de Apps Script
+```
+
+> `clasp push` actualiza el código del proyecto, pero la URL `/exec` sigue sirviendo la última versión desplegada. Después de cada push hay que publicar una nueva versión (con `clasp deploy -d <id>` o desde *Implementar → Gestionar implementaciones*).
+
+### Credenciales
+`clasp login` guarda el token en `~/.clasprc.json`, fuera del repositorio. No lo copies ni lo subas: cada equipo debe autenticarse por separado (`.clasprc.json` está en `.gitignore`).
+
 ## ✒️ Autor
 **Pablo Felip Monferrer**
 
