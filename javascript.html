@@ -520,38 +520,48 @@
     }
 
     function renderSplitCell(td, day, start, end, classData, recordData) {
-        // La fila mide h-16 (64px): reducimos el padding de la celda y dejamos
-        // que las dos mitades encojan para que no desborde la inferior.
+        // La fila mide h-16 (64px): en lugar de apilar dos mitades (que quedaban
+        // muy justas), dividimos la celda en vertical: clase a la izquierda y
+        // sesión no lectiva a la derecha.
         td.style.padding = "2px";
         td.classList.add("overflow-hidden");
 
         const container = document.createElement('div');
-        container.className = "h-full w-full min-h-0 flex flex-col gap-0.5 cursor-pointer overflow-hidden";
+        container.className = "h-full w-full min-h-0 flex flex-row gap-0.5 cursor-pointer overflow-hidden";
         container.onclick = () => openEditor(day, start, end, recordData);
 
-        // Mitad Superior: Clase Lectiva (Compacta)
+        // Mitad izquierda: clase lectiva
         const classPart = document.createElement('div');
-        classPart.className = "flex-1 min-h-0 bg-blue-100 border border-blue-200 rounded-t-md py-0.5 px-1.5 flex items-center justify-between gap-1 text-[10px] leading-tight";
+        classPart.className = "flex-1 min-w-0 bg-blue-100 border border-blue-200 rounded-l-md py-1 px-1.5 flex flex-col justify-center text-[10px] leading-tight";
         classPart.innerHTML = `
             <span class="font-bold text-blue-700 truncate">${escapeHtml(classData.group)}</span>
-            <span class="text-blue-600 truncate max-w-[60px]">${escapeHtml(classData.module || '--')}</span>
+            <span class="text-blue-600 truncate">${escapeHtml(classData.module || '--')}</span>
         `;
 
-        // Mitad Inferior: Sesión No Lectiva
+        // Mitad derecha: sesión no lectiva
         const recordPart = document.createElement('div');
         let recordStyles = "bg-[#e6cff2] border-slate-300";
         if ((recordData.type || '').toLowerCase().includes('guardia')) recordStyles = "bg-[#e6cff2] border-l-4 border-orange-500 shadow-sm";
         else if ((recordData.type || '').toLowerCase().includes('tutoría')) recordStyles = "bg-[#e6cff2] border-l-4 border-emerald-600 shadow-sm";
 
-        recordPart.className = `relative flex-1 min-h-0 rounded-b-md py-0.5 px-1.5 text-[10px] leading-tight border flex flex-col justify-center ${recordStyles}`;
+        recordPart.className = `relative flex-1 min-w-0 rounded-r-md py-1 px-1.5 text-[10px] leading-tight border flex flex-col justify-center ${recordStyles} ${recordData.notes ? 'pr-4' : ''}`;
 
         let titleText = recordData.type || '';
         if ((recordData.type || '').toLowerCase().includes('tutoría') && recordData.group) titleText = `Tutoría ${recordData.group}`;
 
         recordPart.innerHTML = `
             <div class="font-bold text-slate-800 truncate">${escapeHtml(titleText)}</div>
-            ${recordData.notes ? '<i class="ph-fill ph-info text-blue-600 absolute bottom-0.5 right-1 text-[10px]"></i>' : ''}
         `;
+
+        // Icono de notas con el tooltip global: no se recorta por el overflow de la celda
+        if (recordData.notes) {
+            const info = document.createElement('div');
+            info.className = "absolute bottom-0.5 right-0.5 bg-white/60 hover:bg-white rounded-full p-0.5 cursor-help";
+            info.innerHTML = '<i class="ph-fill ph-info text-blue-600 text-[12px]"></i>';
+            info.addEventListener('mouseenter', () => Tooltip.show(recordData.notes, info));
+            info.addEventListener('mouseleave', () => Tooltip.hide());
+            recordPart.appendChild(info);
+        }
 
         container.appendChild(classPart);
         container.appendChild(recordPart);
