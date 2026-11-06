@@ -7,8 +7,9 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 
 ## 🛠️ Detalles técnicos
 *   **Backend**: Google Apps Script (GAS) vinculado a Google Sheets.
+*   **Despliegue**: Webapp restringida a los usuarios del dominio del centro (`access: DOMAIN`).
 *   **Frontend**: HTML5, JavaScript (ES6+), **Tailwind CSS** para el diseño responsivo y **Phosphor Icons**.
-*   **Base de datos**: Google Sheets (4 pestañas principales):
+*   **Base de datos**: Google Sheets (5 pestañas principales):
     *   `Resumen HS`: Perfiles docentes, códigos y metas horarias.
     *   `Horario no lectivo`: Repositorio de todas las sesiones registradas.
     *   `Clases (importado)`: Horario lectivo oficial del centro.
@@ -23,9 +24,11 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 *   Indicadores de estado (PENDIENTE/COMPLETO) y cálculo de metas en tiempo real.
 
 ### 2. Gestión de roles y permisos
-*   **Docente**: Acceso a su propio horario y estadísticas personales.
+*   **Docente**: Acceso a su propio horario y estadísticas personales, además de la vista global del claustro.
 *   **Administrador**: Capacidad para ver y modificar el horario de cualquier docente, acceso a herramientas de supervisión y configuración.
-*   **Lector**: Acceso exclusivo a la vista global para consulta.
+*   **Lector**: Acceso en solo lectura a la vista global.
+
+> La vista global es visible para **todo el profesorado autorizado**: su objetivo es que el claustro sepa quién tiene guardias, tutorías o está en horario de gestión. Por ello, las observaciones de cada sesión también son visibles para el resto de docentes en los tooltips.
 
 ### 3. Supervisión de incidencias (solo administración) 🔍
 *   Panel avanzado que escanea en tiempo real a toda la plantilla para detectar horarios incompletos.
