@@ -15,6 +15,7 @@
         allClassesCount: {}, // Admin Only: { teacherCode: count }
         currentUser: null, // Logged in user (for Admin context)
         lastUpdate: null,  // Info de Auditoría
+        isBusy: false,     // Operación de escritura en curso
 
         // Helpers de cálculo
         getTargets() {
@@ -284,6 +285,12 @@
 
     function switchTeacher(email) {
         if (!email) return;
+
+        // No cambiar de docente mientras hay una escritura en curso
+        if (AppState.isBusy) {
+            renderUserInfo(); // Restaura el selector al docente actual
+            return;
+        }
 
         showLoading("Cargando horario...");
 
@@ -651,6 +658,7 @@
     let currentEditing = null; // {day, start, end, record ? }
 
     function openEditor(day, start, end, existingRecord) {
+        if (AppState.isBusy) return;
         currentEditing = { day, start, end };
 
         // Título
@@ -838,9 +846,30 @@
         }, 3000); // Hide after 3s approx
     }
 
+    // --- BLOQUEO DE ESCRITURAS CONCURRENTES ---
+
+    function beginMutation() {
+        AppState.isBusy = true;
+        setBusyUi(true);
+    }
+
+    function endMutation() {
+        AppState.isBusy = false;
+        setBusyUi(false);
+    }
+
+    function setBusyUi(busy) {
+        const tbody = document.getElementById('schedule-body');
+        if (!tbody) return;
+        // Evita clics en la rejilla y la atenúa mientras se guarda
+        tbody.classList.toggle('pointer-events-none', busy);
+        tbody.classList.toggle('opacity-60', busy);
+    }
+
 
     function performDelete() {
-        if (!currentEditing) return;
+        if (!currentEditing || AppState.isBusy) return;
+        beginMutation();
 
         // Optimistic Delete
         const data = {
@@ -862,6 +891,7 @@
 
         google.script.run
             .withSuccessHandler((res) => {
+                endMutation();
                 console.log("Eliminado OK");
                 AppState.isDirty = true; // Optimization
                 if (res.lastUpdate) {
@@ -870,6 +900,7 @@
                 }
             })
             .withFailureHandler((err) => {
+                endMutation();
                 alert("Error al eliminar: " + err.message);
                 loadInitialData(); // Rollback
             })
@@ -904,6 +935,9 @@
 
 
     function saveData(data) {
+        if (AppState.isBusy) return;
+        beginMutation();
+
         // Optimistic UI: Actualizar localmente antes de backend
         // 1. Quitar registro previo en ese slot si existe
         AppState.myRecords = AppState.myRecords.filter(r =>
@@ -922,6 +956,7 @@
 
         google.script.run
             .withSuccessHandler((res) => {
+                endMutation();
                 console.log("Guardado OK");
                 AppState.isDirty = true; // Optimization
                 if (res.lastUpdate) {
@@ -930,6 +965,7 @@
                 }
             })
             .withFailureHandler((err) => {
+                endMutation();
                 alert("Error al guardar: " + err.message);
                 // Rollback (Reload app simple)
                 loadInitialData();

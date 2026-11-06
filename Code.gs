@@ -14,7 +14,7 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
