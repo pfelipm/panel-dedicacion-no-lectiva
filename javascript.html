@@ -37,6 +37,10 @@
             .replace(/'/g, '&#39;');
     }
 
+    // Flags para no duplicar listeners si initApp se ejecuta de nuevo (rollback)
+    let dropdownListenersBound = false;
+    let globalViewInitialized = false;
+
     // --- INICIALIZACIÓN ---
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -155,20 +159,20 @@
                 <div class="flex items-center gap-3">
                      <div class="hidden md:flex flex-col items-end">
                         <span class="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider mb-0.5">Admin</span>
-                        <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                        <span class="text-[10px] text-slate-400">${escapeHtml(AppState.currentUser.email)}</span>
                     </div>
                     
                     <!-- Teacher Selector -->
                     <select id="admin-teacher-selector" onchange="switchTeacher(this.value)" class="text-xs border border-slate-200 rounded-lg p-1.5 bg-slate-50 text-slate-700 focus:ring-2 focus:ring-purple-500 outline-none w-48 transition-opacity">
-                        <option value="${AppState.currentUser.email}" ${AppState.user.email === AppState.currentUser.email ? 'selected' : ''}>${profile ? 'Mi horario' : '-- Seleccionar docente --'}</option>
+                        <option value="${escapeHtml(AppState.currentUser.email)}" ${AppState.user.email === AppState.currentUser.email ? 'selected' : ''}>${profile ? 'Mi horario' : '-- Seleccionar docente --'}</option>
                         <option disabled>──────────</option>
-                        ${AppState.teachersList.map(t => `<option value="${t.email}" ${AppState.user.email === t.email ? 'selected' : ''}>${t.name}</option>`).join('')}
+                        ${AppState.teachersList.map(t => `<option value="${escapeHtml(t.email)}" ${AppState.user.email === t.email ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
                     </select>
                     
                     <!-- Avatar (User viewed) - Solo mostrar si HAY perfil seleccionado -->
                     ${profile ? `
-                    <div class="h-8 w-8 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center font-bold text-xs border border-purple-200" title="${profile.name}">
-                       ${profile.code}
+                    <div class="h-8 w-8 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center font-bold text-xs border border-purple-200" title="${escapeHtml(profile.name)}">
+                       ${escapeHtml(profile.code)}
                     </div>
                     ` : ''}
                 </div>
@@ -180,7 +184,7 @@
                 <div class="flex items-center gap-3">
                      <div class="hidden md:flex flex-col items-end">
                         <span class="bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider mb-0.5">Lector</span>
-                        <span class="text-[10px] text-slate-400">${AppState.currentUser.email}</span>
+                        <span class="text-[10px] text-slate-400">${escapeHtml(AppState.currentUser.email)}</span>
                     </div>
                      <div class="h-8 w-8 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs border border-orange-200">
                        <i class="ph-fill ph-eye"></i>
@@ -192,11 +196,11 @@
         else if (profile) {
             html = `
                 <div class="flex flex-col items-end mr-2">
-                    <span class="font-medium text-slate-700 leading-tight">${profile.name}</span>
-                    <span class="text-[10px] text-slate-400">${AppState.currentUser?.email || ''}</span>
+                    <span class="font-medium text-slate-700 leading-tight">${escapeHtml(profile.name)}</span>
+                    <span class="text-[10px] text-slate-400">${escapeHtml(AppState.currentUser?.email || '')}</span>
                 </div>
-                <div class="h-8 w-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-xs" title="${profile.code}">
-                  ${profile.code}
+                <div class="h-8 w-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-xs" title="${escapeHtml(profile.code)}">
+                  ${escapeHtml(profile.code)}
                 </div>
             `;
         }
@@ -309,7 +313,11 @@
             })
             .withFailureHandler((err) => {
                 hideLoading();
-                showError(err);
+                console.error("Error al cambiar de docente:", err);
+                // Restaurar el selector y el contexto actual en lugar de
+                // sustituir toda la aplicación por la pantalla de error.
+                renderUserInfo();
+                alert("No se pudo cargar el horario: " + (err.message || "error desconocido"));
             })
             .getTeacherData(email);
     }
@@ -358,8 +366,11 @@
             groupSelect.appendChild(opt);
         });
 
-        // Listener para mostrar campo grupo si es Tutoría
-        // Listener para mostrar campo grupo si es Tutoría y filtrar opciones
+        // Listener para mostrar campo grupo si es Tutoría y filtrar opciones.
+        // Si initApp se ejecuta de nuevo (rollback), no volvemos a enlazarlo.
+        if (dropdownListenersBound) return;
+        dropdownListenersBound = true;
+
         typeSelect.addEventListener('change', (e) => {
             const isTutoria = e.target.value.toLowerCase().includes('tutoría');
             const groupSelect = document.getElementById('input-group');
@@ -509,10 +520,10 @@
         }
 
         container.innerHTML = `
-            <div class="font-bold text-blue-700">${classData.group}</div>
-            <div class="text-blue-600 truncate">${classData.module || '--'}</div>
+            <div class="font-bold text-blue-700">${escapeHtml(classData.group)}</div>
+            <div class="text-blue-600 truncate">${escapeHtml(classData.module || '--')}</div>
             <div class="mt-1 text-[10px] text-blue-500 flex items-center gap-1">
-                <i class="ph-fill ph-chalkboard-teacher"></i> ${classData.classroom || 'Aula ?'}
+                <i class="ph-fill ph-chalkboard-teacher"></i> ${escapeHtml(classData.classroom || 'Aula ?')}
                 ${isAdmin ? '<i class="ph ph-plus-circle ml-auto opacity-0 group-hover:opacity-100 transition-opacity"></i>' : ''}
             </div>
         `;
@@ -596,7 +607,7 @@
             if ((existingRecord.type || '').toLowerCase().includes('tutoría') && existingRecord.group) {
                 titleText = `Tutoría ${existingRecord.group}`;
             } else {
-                subtitleHtml = existingRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${existingRecord.group}</div>` : '';
+                subtitleHtml = existingRecord.group ? `<div class="text-[10px] opacity-80 mt-0.5">Gr: ${escapeHtml(existingRecord.group)}</div>` : '';
             }
 
             // INFO ICON & TOOLTIP
@@ -617,7 +628,7 @@
             }
 
             el.innerHTML = `
-                    <div class="font-bold truncate pr-4">${titleText}</div>
+                    <div class="font-bold truncate pr-4">${escapeHtml(titleText)}</div>
                     ${subtitleHtml}
                     ${infoIconHtml}
                     `;
@@ -1043,9 +1054,7 @@
         }
 
         // Restore/Ensure Progress Bar Calculation
-        const percentage = Math.min(100, (totalSessions / visualTarget) * 100);
-        const pBar = document.getElementById('progress-bar');
-        if (pBar) pBar.style.width = `${percentage}%`;
+        // (la barra de progreso no existe en la vista actual)
 
 
 
@@ -1087,6 +1096,14 @@
     };
 
     function initGlobalView() {
+        if (globalViewInitialized) {
+            renderTeacherFilterList();
+            updateFilterBadges();
+            renderGlobalDashboard();
+            return;
+        }
+        globalViewInitialized = true;
+
         // Inicializar Filtros: Todos los profes seleccionados por defecto
         if (AppState.teachersList) {
             AppState.teachersList.forEach(t => GlobalFilters.selectedTeachers.add(t.email));
@@ -1096,7 +1113,7 @@
         renderTeacherFilterList();
         updateFilterBadges();
 
-        // Setup Search Listener
+        // Setup Search Listener (una sola vez)
         document.getElementById('teacher-search').addEventListener('input', (e) => {
             GlobalFilters.searchTerm = e.target.value.toLowerCase();
             renderTeacherFilterList();
@@ -1138,8 +1155,8 @@
             const isChecked = GlobalFilters.selectedTeachers.has(t.email);
 
             div.innerHTML = `
-                    <input type="checkbox" value="${t.email}" ${isChecked ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5">
-                        <span class="text-xs text-slate-700 truncate">${t.name}</span>
+                    <input type="checkbox" value="${escapeHtml(t.email)}" ${isChecked ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5">
+                        <span class="text-xs text-slate-700 truncate">${escapeHtml(t.name)}</span>
                         `;
 
             // Listener
@@ -1409,13 +1426,13 @@
                     <div class="flex items-center justify-between border-b border-slate-50 pb-3">
                         <div class="flex items-center gap-3">
                             <div class="h-10 w-10 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center font-bold text-sm">
-                                ${teacher.code || '--'}
+                                ${escapeHtml(teacher.code || '--')}
                             </div>
                             <div>
-                                <button onclick="switchTeacher('${teacher.email}'); navigate('my-schedule')" class="font-bold text-slate-800 hover:text-blue-600 transition-colors text-lg text-left block">
-                                    ${teacher.name}
+                                <button data-teacher-email="${escapeHtml(teacher.email)}" class="font-bold text-slate-800 hover:text-blue-600 transition-colors text-lg text-left block">
+                                    ${escapeHtml(teacher.name)}
                                 </button>
-                                <span class="text-xs text-slate-400 font-medium">${teacher.email}</span>
+                                <span class="text-xs text-slate-400 font-medium">${escapeHtml(teacher.email)}</span>
                             </div>
                         </div>
                         <div class="px-3 py-1 rounded-md bg-orange-100 text-orange-600 text-xs font-bold uppercase tracking-wider">
@@ -1461,6 +1478,15 @@
                     </div>
                 `;
                 container.appendChild(card);
+
+                // Navegación al horario del docente sin interpolar el email en un onclick
+                const teacherBtn = card.querySelector('[data-teacher-email]');
+                if (teacherBtn) {
+                    teacherBtn.addEventListener('click', () => {
+                        switchTeacher(teacherBtn.dataset.teacherEmail);
+                        navigate('my-schedule');
+                    });
+                }
             }
         });
 
@@ -1567,7 +1593,7 @@
 
         // Init Dashboard on navigate if needed (or just once)
         if (viewId === 'dashboard') {
-            if (GlobalFilters.selectedTeachers.size === 0 && AppState.teachersList) {
+            if (!globalViewInitialized) {
                 initGlobalView();
             }
             // Optimization: Only refresh if dirty or never loaded
