@@ -14,7 +14,10 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.2.3";
+const APP_VERSION = "1.2.4";
+
+// Logo por defecto si Ajustes!E2 está vacío o no contiene una URL válida.
+const APP_LOGO_FALLBACK = "https://drive.google.com/thumbnail?id=1L1bN-w8xzyqWul07ePiEuBvxP7Z83a30";
 
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
@@ -35,6 +38,15 @@ function doGet(e) {
   template.canal = canal;
   template.canalLabel = canal || '—';
   template.appVersion = APP_VERSION;
+
+  // Logo configurable desde Ajustes!E2; si falta, se usa el de por defecto.
+  let logoUrl = APP_LOGO_FALLBACK;
+  try {
+    logoUrl = getLogoUrl(SpreadsheetApp.getActiveSpreadsheet()) || APP_LOGO_FALLBACK;
+  } catch (err) {
+    console.error("No se pudo leer el logo de Ajustes:", err);
+  }
+  template.logoUrl = logoUrl;
 
   // ALLOWALL permite embeber la webapp en otra página (p. ej. la intranet del
   // centro). Se mantiene de forma consciente porque el uso previsto puede
@@ -536,6 +548,16 @@ function checkReader(ss, email) {
   // Asumimos lectores en Columna D
   const readers = sheet.getRange("D2:D").getValues().flat().filter(String);
   return readers.includes(email);
+}
+
+/**
+ * Devuelve la URL del logo configurada en Ajustes!E2.
+ * Solo acepta http(s); en cualquier otro caso devuelve "".
+ */
+function getLogoUrl(ss) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+  const raw = String(sheet.getRange("E2").getValue() || "").trim();
+  return /^https?:\/\//i.test(raw) ? raw : "";
 }
 
 function getAppConfig(ss) {

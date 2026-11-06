@@ -10,12 +10,13 @@ Optimizar la planificación del horario no lectivo del profesorado, proporcionan
 *   **Despliegue**: Webapp restringida a los usuarios del dominio del centro (`access: DOMAIN`).
 *   **Validación**: el servidor comprueba tipo, día, franja y grupo; `LockService` evita escrituras concurrentes.
 *   **Unidad de medida**: todas las metas y contadores se expresan en **sesiones semanales**. Cada franja cuenta como 1 sesión, aunque su duración real sea de 55 minutos. El tiempo solo se usa para colocar las sesiones en la rejilla y detectar solapamientos, no para contabilizar.
+*   **Logo**: se lee de `Ajustes!E2`; si está vacío o no es una URL válida, se usa el logo por defecto. Así la plantilla puede replicarse en otro centro sin tocar código.
 *   **Frontend**: HTML5, JavaScript (ES6+), **Tailwind CSS** para el diseño responsivo y **Phosphor Icons**.
 *   **Base de datos**: Google Sheets (5 pestañas principales):
     *   `Resumen HS`: Perfiles docentes, códigos y metas en sesiones semanales.
     *   `Horario no lectivo`: Repositorio de todas las sesiones registradas.
     *   `Clases (importado)`: Horario lectivo oficial del centro.
-    *   `Ajustes`: Configuración de tipos de actividad y grupos.
+    *   `Ajustes`: Configuración de tipos de actividad, grupos y URL del logo (E2).
     *   `Auditoría`: Registro histórico de todas las operaciones (logs).
 
 ## ✨ Funcionalidades principales
