@@ -14,7 +14,7 @@ const SHEET_NAMES = {
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 
 // --- DEBUG CONFIGURATION ---
 const DEBUG_CONFIG = {
@@ -560,28 +560,28 @@ function extractScheduleSlots(ss) {
   // Ignorar cabecera
   const rows = data.slice(1);
 
-  // Un slot por DÍA y franja horaria: el descanso puede variar entre días.
-  // Key: "Día|HH:mm-HH:mm"
+  // Una franja es descanso solo si NINGÚN grupo tiene clase en ella.
+  // Las filas con módulo/docente vacío solo indican que ese grupo no tiene
+  // clase en esa franja, no que la franja completa sea un descanso.
+  // Key: "HH:mm-HH:mm"
   const slotsMap = new Map();
 
   rows.forEach(row => {
-    const day = row[1] ? normalizeDay(row[1]) : ""; // B
     const start = formatTime(row[5]); // F (Objeto Date o String HH:mm)
     const end = formatTime(row[6]);   // G
     const hasModule = row[2] && row[2] !== ""; // C
     const hasTeacher = row[3] && row[3] !== ""; // D
 
-    if (!day || !start || !end) return;
+    if (!start || !end) return;
 
-    const key = `${day}|${start}-${end}`;
+    const key = `${start}-${end}`;
 
     // Si NO tiene módulo ni docente, es descanso/hueco.
-    // Si alguna fila del mismo día y franja tiene clase, prevalece CLASS.
+    // Si alguna fila de la misma franja tiene clase, prevalece CLASS.
     const isBreak = !hasModule && !hasTeacher;
 
     if (!slotsMap.has(key)) {
       slotsMap.set(key, {
-        day: day,
         start: start,
         end: end,
         type: isBreak ? 'BREAK' : 'CLASS'
@@ -591,10 +591,8 @@ function extractScheduleSlots(ss) {
     }
   });
 
-  // Convertir a array y ordenar por hora (y día como desempate)
-  return Array.from(slotsMap.values()).sort((a, b) =>
-    a.start.localeCompare(b.start) || a.day.localeCompare(b.day)
-  );
+  // Convertir a array y ordenar por hora
+  return Array.from(slotsMap.values()).sort((a, b) => a.start.localeCompare(b.start));
 }
 
 function getTeachingClasses(ss, teacherCode) {

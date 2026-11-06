@@ -481,7 +481,9 @@
                     renderInteractiveCell(td, day, slot.start, slot.end, myRecord);
                 } else {
                     // -- SLOT VACÍO O DESCANSO --
-                    const scheduleItem = AppState.schedule.find(s => s.day === day && s.start === slot.start && s.end === slot.end);
+                    // El descanso es una propiedad de la franja, no del día:
+                    // si algún grupo tiene clase a esa hora, la franja es lectiva.
+                    const scheduleItem = AppState.schedule.find(s => s.start === slot.start && s.end === slot.end);
                     const isBreak = scheduleItem ? scheduleItem.type === 'BREAK' : false;
 
                     if (isBreak) {
