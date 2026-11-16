@@ -9,12 +9,22 @@ const SHEET_NAMES = {
   TEACHERS: "Resumen HS",
   CLASSES: "Clases (importado)",
   SETTINGS: "Ajustes",
-  RECORDS: "Horario no lectivo"
+  RECORDS: "Horario no lectivo",
+  ACCESS: "Acceso PIN",
+  AUDIT: "Auditoría"
 };
 
 // --- VERSIÓN DE LA APP ---
 // Se muestra en el panel lateral. Actualizar al publicar cambios.
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.1";
+
+// --- ACCESO POR PIN (RESPALDO DE IDENTIDAD) ---
+// La pestaña "Acceso PIN" solo aporta credenciales. Los permisos siguen
+// saliendo de Ajustes (admins/lectores) y Resumen HS (docentes).
+const PIN_SESSION_HOURS = 8;
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MINUTES = 5;
+const PIN_SESSIONS_PROPERTY = "PIN_SESSIONS";
 
 // Logo por defecto si Ajustes!E2 está vacío o no contiene una URL válida.
 const APP_LOGO_FALLBACK = "https://drive.google.com/thumbnail?id=1L1bN-w8xzyqWul07ePiEuBvxP7Z83a30";
@@ -63,12 +73,10 @@ function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
 }
 
-// --- HELPER DE USUARIO (DEBUG AWARE) ---
-function getCurrentUserEmail() {
-  if (DEBUG_CONFIG.debug) {
-    return DEBUG_CONFIG.email;
-  }
-  return Session.getActiveUser().getEmail();
+// --- HELPERS DE IDENTIDAD ---
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 /**
@@ -80,7 +88,7 @@ function assertAuthorized(ss, email) {
   // Sin email no hay identidad: evita que una cuenta no identificada
   // pudiera casar con filas vacías de la hoja.
   if (!email) {
-    throw new Error("No se ha podido identificar tu cuenta de usuario.");
+    throw new Error("[AUTH] No se ha podido identificar tu cuenta de usuario.");
   }
 
   const profile = getTeacherProfile(ss, email);
@@ -88,10 +96,276 @@ function assertAuthorized(ss, email) {
   const isReader = checkReader(ss, email);
 
   if (!profile && !isAdmin && !isReader) {
-    throw new Error("No tienes permisos de acceso o no estás registrado como docente.");
+    throw new Error("[AUTH] No tienes permisos de acceso o no estás registrado como docente.");
   }
 
   return { profile, isAdmin, isReader };
+}
+
+// --- AUTENTICACIÓN POR PIN ---
+// Las funciones internas viven dentro de un IIFE para que no puedan
+// invocarse desde google.script.run. Solo se exponen authenticateWithPin
+// y revokeMySession; getCurrentUserEmail queda disponible para los endpoints.
+const PinAuth = (function () {
+
+/**
+ * Devuelve la fila de "Acceso PIN" para un email, o null si no existe.
+ * Solo se leen Email y PIN; "Notas" es de uso manual.
+ */
+function getAccessRecord(ss, email) {
+  const sheet = ss.getSheetByName(SHEET_NAMES.ACCESS);
+  if (!sheet) {
+    throw new Error("Falta la pestaña '" + SHEET_NAMES.ACCESS + "' en la hoja de cálculo.");
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return null;
+
+  const headers = data[0].map(h => String(h).trim().toLowerCase());
+  const idxEmail = headers.indexOf("email");
+  const idxPin = headers.indexOf("pin");
+  if (idxEmail === -1 || idxPin === -1) {
+    throw new Error("La pestaña '" + SHEET_NAMES.ACCESS + "' debe tener columnas 'Email' y 'PIN'.");
+  }
+
+  const target = normalizeEmail(email);
+  const row = data.slice(1).find(r => normalizeEmail(r[idxEmail]) === target);
+  if (!row) return null;
+
+  return {
+    email: normalizeEmail(row[idxEmail]),
+    pin: String(row[idxPin] === null || row[idxPin] === undefined ? "" : row[idxPin]).trim()
+  };
+}
+
+function getPinLock(email) {
+  const cache = CacheService.getScriptCache();
+  const until = Number(cache.get("pin_lock:" + email) || 0);
+  if (!until || until <= Date.now()) return null;
+  return {
+    retryAfter: Math.ceil((until - Date.now()) / 1000),
+    resetAt: new Date(until).toISOString()
+  };
+}
+
+function registerPinFailure(email) {
+  const cache = CacheService.getScriptCache();
+  const failKey = "pin_fail:" + email;
+  const fails = Number(cache.get(failKey) || 0) + 1;
+
+  if (fails >= PIN_MAX_ATTEMPTS) {
+    const until = Date.now() + PIN_LOCK_MINUTES * 60 * 1000;
+    cache.put("pin_lock:" + email, String(until), PIN_LOCK_MINUTES * 60);
+    cache.remove(failKey);
+    return {
+      locked: true,
+      retryAfter: PIN_LOCK_MINUTES * 60,
+      resetAt: new Date(until).toISOString()
+    };
+  }
+
+  cache.put(failKey, String(fails), PIN_LOCK_MINUTES * 60);
+  return { locked: false, remaining: PIN_MAX_ATTEMPTS - fails };
+}
+
+/**
+ * Valida email + PIN y devuelve un token de sesión de 8 horas.
+ * No crea token si el email no está autorizado en Ajustes/Resumen HS.
+ */
+function authenticateWithPin(email, pin) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cleanEmail = normalizeEmail(email);
+  const cleanPin = String(pin === null || pin === undefined ? "" : pin).trim();
+
+  if (!cleanEmail || !cleanPin) {
+    return { success: false, message: "Introduce email y PIN." };
+  }
+
+  const lock = getPinLock(cleanEmail);
+  if (lock) {
+    return {
+      success: false,
+      code: "LOCKED",
+      retryAfter: lock.retryAfter,
+      resetAt: lock.resetAt,
+      message: "Demasiados intentos."
+    };
+  }
+
+  const access = getAccessRecord(ss, cleanEmail);
+  if (!access || access.pin !== cleanPin) {
+    const state = registerPinFailure(cleanEmail);
+    logAccess(cleanEmail, "LOGIN_PIN_FALLIDO");
+
+    if (state.locked) {
+      return {
+        success: false,
+        code: "LOCKED",
+        retryAfter: state.retryAfter,
+        resetAt: state.resetAt,
+        message: "Demasiados intentos."
+      };
+    }
+
+    return {
+      success: false,
+      message: "Email o PIN incorrecto. Te quedan " + state.remaining + " intentos."
+    };
+  }
+
+  // El PIN es correcto, pero el usuario debe existir en Ajustes/Resumen HS.
+  try {
+    assertAuthorized(ss, cleanEmail);
+  } catch (err) {
+    console.error("Autorización PIN fallida para " + cleanEmail + ":", err);
+    logAccess(cleanEmail, "LOGIN_PIN_DENEGADO");
+    return {
+      success: false,
+      message: "Este email no tiene acceso a la aplicación."
+    };
+  }
+
+  const pinCache = CacheService.getScriptCache();
+  pinCache.remove("pin_fail:" + cleanEmail);
+  pinCache.remove("pin_lock:" + cleanEmail);
+
+  const token = createSession(cleanEmail);
+  logAccess(cleanEmail, "LOGIN_PIN");
+
+  return { success: true, token: token, email: cleanEmail };
+}
+
+function revokeMySession(sessionToken) {
+  const email = getSessionEmail(sessionToken);
+  revokeSession(sessionToken);
+  if (email) {
+    logAccess(email, "LOGOUT");
+  }
+  return { success: true };
+}
+
+// --- ALMACÉN DE SESIONES PIN ---
+// ScriptProperties permite una caducidad exacta de 8 h; CacheService
+// tiene un máximo de 6 h. El mapa se limpia al crear/validar sesiones.
+
+function getPinSessions() {
+  const raw = PropertiesService.getScriptProperties().getProperty(PIN_SESSIONS_PROPERTY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) || {};
+  } catch (err) {
+    console.error("PIN_SESSIONS inválido:", err);
+    return {};
+  }
+}
+
+function savePinSessions(sessions) {
+  PropertiesService.getScriptProperties().setProperty(PIN_SESSIONS_PROPERTY, JSON.stringify(sessions));
+}
+
+function prunePinSessions(sessions) {
+  const now = Date.now();
+  Object.keys(sessions).forEach(token => {
+    const session = sessions[token];
+    if (!session || !session.exp || session.exp < now) {
+      delete sessions[token];
+    }
+  });
+}
+
+function createSession(email) {
+  const token = Utilities.getUuid();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sessions = getPinSessions();
+    prunePinSessions(sessions);
+    sessions[token] = {
+      email: normalizeEmail(email),
+      exp: Date.now() + PIN_SESSION_HOURS * 60 * 60 * 1000
+    };
+    savePinSessions(sessions);
+  } finally {
+    lock.releaseLock();
+  }
+  return token;
+}
+
+function getSessionEmail(sessionToken) {
+  if (!sessionToken) return null;
+  const sessions = getPinSessions();
+  const session = sessions[sessionToken];
+  if (!session) return null;
+  if (!session.exp || session.exp < Date.now()) return null;
+  return normalizeEmail(session.email);
+}
+
+function getCurrentUserEmail(sessionToken) {
+  if (DEBUG_CONFIG.debug) {
+    return DEBUG_CONFIG.email;
+  }
+  if (sessionToken) {
+    const email = getSessionEmail(sessionToken);
+    if (!email) {
+      throw new Error("[AUTH] Tu sesión ha caducado. Vuelve a identificarte.");
+    }
+    return email;
+  }
+  return Session.getActiveUser().getEmail();
+}
+
+function revokeSession(sessionToken) {
+  if (!sessionToken) return;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sessions = getPinSessions();
+    delete sessions[sessionToken];
+    savePinSessions(sessions);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Registra un acceso en la pestaña Auditoría usando las mismas columnas
+ * que las operaciones de sesión: Timestamp, Actor, Rol, Objetivo, Acción,
+ * Slot, Tipo, Grupo. La columna Tipo se deja vacía: está reservada para el
+ * tipo de sesión del horario semanal. El acceso se identifica por Acción.
+ */
+function logAccess(email, action) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const auditSheet = ensureAuditSheet(ss);
+    auditSheet.appendRow([
+      new Date(),
+      email || "",
+      "PIN",
+      email || "",
+      action,
+      "",
+      "",
+      ""
+    ]);
+  } catch (err) {
+    console.error("Error logging access:", err);
+  }
+}
+
+return {
+  authenticateWithPin: authenticateWithPin,
+  revokeMySession: revokeMySession,
+  getCurrentUserEmail: getCurrentUserEmail
+};
+})();
+
+// Endpoints públicos expuestos a google.script.run.
+function authenticateWithPin(email, pin) {
+  return PinAuth.authenticateWithPin(email, pin);
+}
+
+function revokeMySession(sessionToken) {
+  return PinAuth.revokeMySession(sessionToken);
 }
 
 // --- API PÚBLICA (LLAMADA DESDE FRONTEND) ---
@@ -103,8 +377,8 @@ function assertAuthorized(ss, email) {
  * 3. Estructura del Horario (Slots derivados de 'Clases').
  * 4. Calendario Global (Ocupación de todos).
  */
-function getInitialData() {
-  const userEmail = getCurrentUserEmail();
+function getInitialData(sessionToken) {
+  const userEmail = PinAuth.getCurrentUserEmail(sessionToken);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // 1. Identificar Usuario y validar acceso (docente OR admin OR reader)
@@ -150,8 +424,8 @@ function getInitialData() {
 /**
  * Endpoint para cambiar de docente (Solo Admin)
  */
-function getTeacherData(targetEmail) {
-  const userEmail = getCurrentUserEmail();
+function getTeacherData(sessionToken, targetEmail) {
+  const userEmail = PinAuth.getCurrentUserEmail(sessionToken);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   if (!checkAdmin(ss, userEmail)) {
@@ -177,9 +451,9 @@ function getTeacherData(targetEmail) {
 // --- HELPER: AUDIT SYSTEM ---
 
 function ensureAuditSheet(ss) {
-  let auditSheet = ss.getSheetByName("Auditoría");
+  let auditSheet = ss.getSheetByName(SHEET_NAMES.AUDIT);
   if (!auditSheet) {
-    auditSheet = ss.insertSheet("Auditoría");
+    auditSheet = ss.insertSheet(SHEET_NAMES.AUDIT);
     // Headers: Timestamp, Actor, Rol, Objetivo, Acción, Slot, Tipo, Grupo
     auditSheet.appendRow(["Timestamp", "Actor", "Rol", "Objetivo", "Acción", "Slot", "Tipo", "Grupo"]);
     auditSheet.setFrozenRows(1);
@@ -197,7 +471,7 @@ function logAudit(actorEmail, targetEmail, action, sessionData) {
     const slot = `${sessionData.day} ${startStr}-${sessionData.end}`;
 
     const timestamp = new Date();
-    const role = (actorEmail === targetEmail) ? "Propietario" : "Admin";
+    const role = (normalizeEmail(actorEmail) === normalizeEmail(targetEmail)) ? "Propietario" : "Admin";
 
     auditSheet.appendRow([
       timestamp,
@@ -287,10 +561,10 @@ function validateSessionData(ss, sessionData, teacherProfile, isAdmin) {
 /**
  * Guarda una nueva sesión no lectiva
  */
-function saveSession(sessionData) {
+function saveSession(sessionToken, sessionData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.RECORDS);
-  const requesterEmail = getCurrentUserEmail();
+  const requesterEmail = PinAuth.getCurrentUserEmail(sessionToken);
 
   // Validaciones básicas de seguridad
   const access = assertAuthorized(ss, requesterEmail);
@@ -302,13 +576,13 @@ function saveSession(sessionData) {
   }
 
   // Si intenta guardar para otro, verificamos si es admin
-  if (sessionData.email !== requesterEmail) {
+  if (normalizeEmail(sessionData.email) !== normalizeEmail(requesterEmail)) {
     if (!isAdmin) {
       throw new Error("No tienes permisos para guardar sesiones de otro usuario.");
     }
   }
 
-  const teacherProfile = (sessionData.email === requesterEmail)
+  const teacherProfile = (normalizeEmail(sessionData.email) === normalizeEmail(requesterEmail))
     ? access.profile
     : getTeacherProfile(ss, sessionData.email);
 
@@ -370,7 +644,7 @@ function saveSession(sessionData) {
 
     // Solapamiento con otras sesiones no lectivas del mismo docente
     const hasRecordOverlap = data.slice(1).some(row => {
-      if (!row[0] || row[0] !== sessionData.email) return false;
+      if (!row[0] || normalizeEmail(row[0]) !== normalizeEmail(sessionData.email)) return false;
       if (normalizeDay(row[1]) !== sessionData.day) return false;
       if (formatTime(row[2]) === sessionData.start) return false; // fila que se actualizará
 
@@ -390,7 +664,7 @@ function saveSession(sessionData) {
     // Empezamos en i=1 para saltar cabecera
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      if (row[0] === sessionData.email && normalizeDay(row[1]) === sessionData.day && formatTime(row[2]) === sessionData.start) {
+      if (normalizeEmail(row[0]) === normalizeEmail(sessionData.email) && normalizeDay(row[1]) === sessionData.day && formatTime(row[2]) === sessionData.start) {
         rowIndexToUpdate = i + 1; // 1-based index for getRange
         break;
       }
@@ -431,10 +705,10 @@ function saveSession(sessionData) {
 /**
  * Elimina una sesión no lectiva
  */
-function deleteSession(sessionData) {
+function deleteSession(sessionToken, sessionData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAMES.RECORDS);
-  const requesterEmail = getCurrentUserEmail();
+  const requesterEmail = PinAuth.getCurrentUserEmail(sessionToken);
 
   // 1. Validar Permisos
   const access = assertAuthorized(ss, requesterEmail);
@@ -445,7 +719,7 @@ function deleteSession(sessionData) {
     throw new Error("Tu perfil es de solo lectura.");
   }
 
-  if (sessionData.email !== requesterEmail && !isAdmin) {
+  if (normalizeEmail(sessionData.email) !== normalizeEmail(requesterEmail) && !isAdmin) {
     throw new Error("No puedes eliminar sesiones de otro usuario.");
   }
 
@@ -466,7 +740,7 @@ function deleteSession(sessionData) {
       const rowDay = normalizeDay(row[1]);
       const rowStart = formatTime(row[2]);
 
-      if (rowEmail === sessionData.email && rowDay === targetDay && rowStart === targetStartStr) {
+      if (normalizeEmail(rowEmail) === normalizeEmail(sessionData.email) && rowDay === targetDay && rowStart === targetStartStr) {
         // Upgrade: Audit Log
         logAudit(requesterEmail, sessionData.email, "ELIMINAR", sessionData);
 
@@ -521,7 +795,8 @@ function getTeacherProfile(ss, email) {
   const idxTutoria = headers.findIndex(h => String(h).toLowerCase().includes("tutoría grupo"));
 
   // Buscar fila del email (Empezamos datos en fila 4 -> índice 3)
-  const teacherRow = data.slice(3).find(r => r[idxEmail] === email);
+  const targetEmail = normalizeEmail(email);
+  const teacherRow = data.slice(3).find(r => normalizeEmail(r[idxEmail]) === targetEmail);
 
   if (!teacherRow) return null;
 
@@ -539,15 +814,17 @@ function getTeacherProfile(ss, email) {
 function checkAdmin(ss, email) {
   const sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
   // Asumimos admins en Columna C
+  const target = normalizeEmail(email);
   const admins = sheet.getRange("C2:C").getValues().flat().filter(String);
-  return admins.includes(email);
+  return admins.some(admin => normalizeEmail(admin) === target);
 }
 
 function checkReader(ss, email) {
   const sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
   // Asumimos lectores en Columna D
+  const target = normalizeEmail(email);
   const readers = sheet.getRange("D2:D").getValues().flat().filter(String);
-  return readers.includes(email);
+  return readers.some(reader => normalizeEmail(reader) === target);
 }
 
 /**
@@ -643,8 +920,9 @@ function getTeacherRecords(ss, email) {
   const sheet = ss.getSheetByName(SHEET_NAMES.RECORDS);
   const data = sheet.getDataRange().getValues().slice(1); // Skip header
 
+  const targetEmail = normalizeEmail(email);
   return data
-    .filter(row => row[0] === email)
+    .filter(row => normalizeEmail(row[0]) === targetEmail)
     .map(row => ({
       email: row[0],
       day: normalizeDay(row[1]),
@@ -782,9 +1060,9 @@ function getAllClassesCount(ss) {
  * La vista global es visible para todo el profesorado autorizado, pero exige
  * que el usuario esté registrado en la app (docente, admin o lector).
  */
-function getAllNonTeachingRecords(ss) {
-  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
-  assertAuthorized(ss, getCurrentUserEmail());
+function getAllNonTeachingRecords(sessionToken) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  assertAuthorized(ss, PinAuth.getCurrentUserEmail(sessionToken));
   return readAllNonTeachingRecords(ss);
 }
 
@@ -813,17 +1091,24 @@ function readAllNonTeachingRecords(ss) {
  * Obtiene la última modificación registrada en la hoja de Auditoría para un docente.
  */
 function getLastUpdateForUser(ss, targetEmail) {
-  const sheet = ss.getSheetByName("Auditoría");
+  const sheet = ss.getSheetByName(SHEET_NAMES.AUDIT);
   if (!sheet) return null;
 
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return null; // Solo cabecera
 
   // Buscamos de abajo hacia arriba (más reciente primero)
-  // Estructura: A:Timestamp, B:Actor, C:Rol, D:Objetivo...
+  // Estructura: A:Timestamp, B:Actor, C:Rol, D:Objetivo, E:Acción, F:Slot, G:Tipo...
+  // Los accesos con PIN también apuntan al email en "Objetivo", pero no son
+  // modificaciones de horario. Se identifican por Acción (Tipo queda vacío).
+  // Se mantiene la comprobación de Tipo = ACCESO por filas antiguas.
+  const normalizedTarget = normalizeEmail(targetEmail);
   for (let i = data.length - 1; i >= 1; i--) {
     const row = data[i];
-    if (row[3] === targetEmail) {
+    const type = String(row[6] || "").trim().toUpperCase();
+    const action = String(row[4] || "").trim().toUpperCase();
+    const isAccessLog = type === "ACCESO" || action.indexOf("LOGIN_PIN") === 0 || action === "LOGOUT";
+    if (!isAccessLog && normalizeEmail(row[3]) === normalizedTarget) {
       return {
         timestamp: row[0] instanceof Date ? row[0].toISOString() : row[0],
         actor: row[1]

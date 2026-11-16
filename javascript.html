@@ -38,6 +38,40 @@
             .replace(/'/g, '&#39;');
     }
 
+    // --- SESIÓN POR PIN ---
+    const SESSION_TOKEN_KEY = 'pnl_session_token';
+    const PIN_EMAIL_KEY = 'pnl_pin_email';
+
+    function getStoredValue(key) {
+        try {
+            return localStorage.getItem(key) || '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function setStoredValue(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) {
+            // Almacenamiento no disponible: la sesión durará solo esta carga.
+        }
+    }
+
+    function removeStoredValue(key) {
+        try {
+            localStorage.removeItem(key);
+        } catch (e) {
+            // Almacenamiento no disponible.
+        }
+    }
+
+    let SESSION_TOKEN = getStoredValue(SESSION_TOKEN_KEY);
+
+    function isAuthError(err) {
+        return !!(err && err.message && err.message.indexOf('[AUTH]') !== -1);
+    }
+
     // Flags para no duplicar listeners si initApp se ejecuta de nuevo (rollback)
     let dropdownListenersBound = false;
     let globalViewInitialized = false;
@@ -48,11 +82,26 @@
         loadInitialData();
     });
 
-    function loadInitialData() {
+    function loadInitialData(retryAuth = true) {
         google.script.run
             .withSuccessHandler(initApp)
-            .withFailureHandler(showError)
-            .getInitialData();
+            .withFailureHandler((err) => {
+                // La sesión recién creada puede tardar un instante en ser visible.
+                if (retryAuth && isAuthError(err) && SESSION_TOKEN) {
+                    setTimeout(() => loadInitialData(false), 500);
+                    return;
+                }
+                handleLoadError(err);
+            })
+            .getInitialData(SESSION_TOKEN);
+    }
+
+    function handleLoadError(err) {
+        if (isAuthError(err) && SESSION_TOKEN) {
+            removeStoredValue(SESSION_TOKEN_KEY);
+            SESSION_TOKEN = '';
+        }
+        showError(err);
     }
 
     function initApp(data) {
@@ -85,16 +134,25 @@
         AppState.lastUpdate = data.lastUpdate || null;
 
         // Renderizar UI base
-        renderUserInfo();
-        renderNavigation();
-        renderDropdowns();
+        try {
+            renderUserInfo();
+            const logoutBtn = document.getElementById('btn-pin-logout');
+            if (logoutBtn) logoutBtn.classList.toggle('hidden', !SESSION_TOKEN);
+            renderNavigation();
+            renderDropdowns();
 
+            // Renderizar Vistas
+            renderScheduleGrid();
+            updateStats();
+            renderLastUpdate();
+            renderVersion();
+        } catch (renderErr) {
+            console.error("Error renderizando el panel:", renderErr);
+            showError({ message: "No se ha podido renderizar el panel. Recarga la página." });
+            return;
+        }
 
-        // Renderizar Vistas
-        renderScheduleGrid();
-        updateStats();
-        renderLastUpdate();
-        renderVersion();
+        hideLoading();
 
         // Ocultar loading
         document.getElementById('loading')?.classList.add('fade-out');
@@ -118,30 +176,226 @@
         console.error("Show Error:", err);
         // Remove loading
         document.getElementById('loading')?.remove();
+        hideLoading();
 
-        // Show Full Screen Error
-        const main = document.querySelector('main');
-        if (main) {
-            main.innerHTML = `
-                <div class="flex-1 flex items-center justify-center bg-slate-50 p-6">
-                    <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-red-100 text-center">
-                        <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                            <i class="ph ph-warning-circle text-3xl"></i>
-                        </div>
-                        <h2 class="text-xl font-bold text-slate-800 mb-2">Acceso Denegado / Error</h2>
-                        <p class="text-slate-500 mb-6 text-sm leading-relaxed">${err.message || 'Error desconocido'}</p>
-                        ${err.message && err.message.includes('registrado') ? `
-                            <div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                Si crees que esto es un error, contacta con Jefatura de Estudios para que te den de alta en la plataforma.
-                            </div>
-                        ` : ''}
-                        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Reintentar</button>
-                    </div>
-                </div>
-            `;
-        } else {
-            alert("Error crítico: " + (err.message || "Error desconocido"));
+        const rawMessage = err && err.message ? err.message : 'Error desconocido';
+        const authError = isAuthError(err);
+        const message = rawMessage.replace('[AUTH]', '').trim() || 'Error desconocido';
+
+        // Overlay sobre la app: no destruye el DOM, de modo que tras validar
+        // el PIN se puede llamar a loadInitialData() sin recargar la página.
+        let overlay = document.getElementById('app-error-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'app-error-overlay';
+            document.body.appendChild(overlay);
         }
+
+        overlay.className = "fixed inset-0 bg-slate-50 z-[55] flex items-center justify-center p-6 overflow-auto";
+        overlay.innerHTML = `
+            <div class="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-red-100 text-center">
+                <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i class="ph ph-warning-circle text-3xl"></i>
+                </div>
+                <h2 class="text-xl font-bold text-slate-800 mb-2">Acceso Denegado / Error</h2>
+                <p class="text-slate-500 mb-6 text-sm leading-relaxed">${escapeHtml(message)}</p>
+                ${message.includes('registrado') ? `
+                    <div class="text-xs text-slate-400 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        Si crees que esto es un error, contacta con Jefatura de Estudios para que te den de alta en la plataforma.
+                    </div>
+                ` : ''}
+                <div class="mt-5 flex flex-col sm:flex-row gap-2 justify-center">
+                    ${authError ? `
+                        <button onclick="openPinModal()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition-colors">
+                            Acceder con PIN
+                        </button>
+                    ` : ''}
+                    <button onclick="retryLoadFromError()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors">Reintentar</button>
+                </div>
+            </div>
+        `;
+    }
+
+    function closeAppError() {
+        document.getElementById('app-error-overlay')?.remove();
+    }
+
+    function retryLoadFromError() {
+        closeAppError();
+        showLoading('Cargando panel...');
+        loadInitialData();
+    }
+
+    // --- ACCESO POR PIN ---
+    let pinCountdownTimer = null;
+
+    function openPinModal() {
+        const modal = document.getElementById('modal-pin');
+        if (!modal) return;
+
+        if (pinCountdownTimer) {
+            clearInterval(pinCountdownTimer);
+            pinCountdownTimer = null;
+        }
+
+        const errorEl = document.getElementById('pin-error');
+        if (errorEl) errorEl.textContent = '';
+
+        const submitBtn = document.getElementById('btn-pin-submit');
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Entrar';
+        }
+
+        const emailInput = document.getElementById('pin-email');
+        if (emailInput && !emailInput.value) {
+            emailInput.value = getStoredValue(PIN_EMAIL_KEY);
+        }
+
+        const pinInput = document.getElementById('pin-code');
+        if (pinInput) pinInput.value = '';
+
+        modal.classList.remove('hidden');
+        if (emailInput && !emailInput.value) {
+            emailInput.focus();
+        } else if (pinInput) {
+            pinInput.focus();
+        }
+    }
+
+    function closePinModal() {
+        document.getElementById('modal-pin')?.classList.add('hidden');
+        if (pinCountdownTimer) {
+            clearInterval(pinCountdownTimer);
+            pinCountdownTimer = null;
+        }
+    }
+
+    function formatCountdown(totalSeconds) {
+        const safe = Math.max(0, Number(totalSeconds) || 0);
+        const minutes = Math.floor(safe / 60).toString().padStart(2, '0');
+        const seconds = (safe % 60).toString().padStart(2, '0');
+        return `${minutes}:${seconds}`;
+    }
+
+    function formatClock(isoValue) {
+        try {
+            const date = new Date(isoValue);
+            if (isNaN(date.getTime())) return '';
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function startPinCountdown(seconds, resetAt) {
+        const errorEl = document.getElementById('pin-error');
+        const submitBtn = document.getElementById('btn-pin-submit');
+        if (!errorEl) return;
+
+        if (pinCountdownTimer) {
+            clearInterval(pinCountdownTimer);
+            pinCountdownTimer = null;
+        }
+
+        const until = Date.now() + (Number(seconds) || 0) * 1000;
+        const resetLabel = formatClock(resetAt);
+
+        const tick = () => {
+            const remaining = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+            if (remaining <= 0) {
+                clearInterval(pinCountdownTimer);
+                pinCountdownTimer = null;
+                errorEl.textContent = 'Ya puedes reintentar.';
+                if (submitBtn) submitBtn.disabled = false;
+                return;
+            }
+            errorEl.textContent = `Demasiados intentos. Reintenta en ${formatCountdown(remaining)}${resetLabel ? ` (a las ${resetLabel})` : ''}.`;
+        };
+
+        if (submitBtn) submitBtn.disabled = true;
+        tick();
+        pinCountdownTimer = setInterval(tick, 1000);
+    }
+
+    function submitPin(event) {
+        if (event) event.preventDefault();
+
+        const emailInput = document.getElementById('pin-email');
+        const pinInput = document.getElementById('pin-code');
+        const errorEl = document.getElementById('pin-error');
+        const submitBtn = document.getElementById('btn-pin-submit');
+
+        const email = (emailInput?.value || '').trim();
+        const pin = (pinInput?.value || '').trim();
+
+        if (!email || !pin) {
+            if (errorEl) errorEl.textContent = 'Introduce email y PIN.';
+            return;
+        }
+
+        if (errorEl) errorEl.textContent = '';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Comprobando...';
+        }
+
+        google.script.run
+            .withSuccessHandler((res) => {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Entrar';
+                }
+
+                if (!res || !res.success) {
+                    if (res && res.code === 'LOCKED') {
+                        startPinCountdown(res.retryAfter, res.resetAt);
+                    } else if (errorEl) {
+                        errorEl.textContent = (res && res.message) || 'Email o PIN incorrecto.';
+                    }
+                    return;
+                }
+
+                setStoredValue(SESSION_TOKEN_KEY, res.token);
+                setStoredValue(PIN_EMAIL_KEY, res.email);
+                SESSION_TOKEN = res.token;
+                closePinModal();
+                closeAppError();
+                showLoading('Cargando panel...');
+                loadInitialData();
+            })
+            .withFailureHandler((err) => {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Entrar';
+                }
+                if (errorEl) {
+                    const message = err && err.message ? err.message.replace('[AUTH]', '').trim() : 'Error al comprobar el PIN.';
+                    errorEl.textContent = message;
+                }
+            })
+            .authenticateWithPin(email, pin);
+    }
+
+    function logoutPinSession() {
+        const token = SESSION_TOKEN;
+        removeStoredValue(SESSION_TOKEN_KEY);
+        SESSION_TOKEN = '';
+
+        const showLoggedOut = () => {
+            closeAppError();
+            showError({ message: '[AUTH] Has cerrado la sesión de PIN. Accede de nuevo o recarga la página.' });
+        };
+
+        if (!token) {
+            showLoggedOut();
+            return;
+        }
+
+        google.script.run
+            .withSuccessHandler(showLoggedOut)
+            .withFailureHandler(showLoggedOut)
+            .revokeMySession(token);
     }
 
 
@@ -321,12 +575,20 @@
             .withFailureHandler((err) => {
                 hideLoading();
                 console.error("Error al cambiar de docente:", err);
+                if (isAuthError(err)) {
+                    if (SESSION_TOKEN) {
+                        removeStoredValue(SESSION_TOKEN_KEY);
+                        SESSION_TOKEN = '';
+                    }
+                    showError(err);
+                    return;
+                }
                 // Restaurar el selector y el contexto actual en lugar de
                 // sustituir toda la aplicación por la pantalla de error.
                 renderUserInfo();
                 alert("No se pudo cargar el horario: " + (err.message || "error desconocido"));
             })
-            .getTeacherData(email);
+            .getTeacherData(SESSION_TOKEN, email);
     }
 
     function renderNavigation() {
@@ -903,10 +1165,18 @@
             })
             .withFailureHandler((err) => {
                 endMutation();
+                if (isAuthError(err)) {
+                    if (SESSION_TOKEN) {
+                        removeStoredValue(SESSION_TOKEN_KEY);
+                        SESSION_TOKEN = '';
+                    }
+                    showError(err);
+                    return;
+                }
                 alert("Error al eliminar: " + err.message);
                 loadInitialData(); // Rollback
             })
-            .deleteSession(data);
+            .deleteSession(SESSION_TOKEN, data);
     }
 
     // Interceptar submit
@@ -968,11 +1238,19 @@
             })
             .withFailureHandler((err) => {
                 endMutation();
+                if (isAuthError(err)) {
+                    if (SESSION_TOKEN) {
+                        removeStoredValue(SESSION_TOKEN_KEY);
+                        SESSION_TOKEN = '';
+                    }
+                    showError(err);
+                    return;
+                }
                 alert("Error al guardar: " + err.message);
                 // Rollback (Reload app simple)
                 loadInitialData();
             })
-            .saveSession(data);
+            .saveSession(SESSION_TOKEN, data);
     }
 
 
@@ -1658,8 +1936,12 @@
             })
             .withFailureHandler((err) => {
                 hideLoading();
+                if (isAuthError(err) && SESSION_TOKEN) {
+                    removeStoredValue(SESSION_TOKEN_KEY);
+                    SESSION_TOKEN = '';
+                }
                 showError(err);
             })
-            .getAllNonTeachingRecords();
+            .getAllNonTeachingRecords(SESSION_TOKEN);
     }
 </script>
