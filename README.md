@@ -146,6 +146,37 @@ Flujo con PIN (cuenta equivocada o no autorizada)
 - **Sin recarga tras el PIN.** El primer intento hacía `location.reload()`; en el iframe de `HtmlService` eso podía dejar el panel en blanco. Ahora el error se muestra en un overlay que no destruye el DOM y, al validar el PIN, se llama directamente a `loadInitialData()`. Hay un reintento de 500 ms por si la sesión recién creada aún no es visible.
 - **Mensaje de error accionable.** Los errores de identidad llevan el prefijo interno `[AUTH]`; la UI lo interpreta y muestra el botón del PIN sin exponer detalles técnicos.
 
+### Modelo de sesión: dos almacenes, dos funciones
+
+El token aparece en dos sitios, pero **no es un secreto duplicado**: son las dos mitades de la misma sesión.
+
+```text
+Navegador (cliente)                         Servidor (Apps Script)
+localStorage: "uuid-abc-123"  ──RPC──>  ScriptProperties:
+                                          PIN_SESSIONS = {
+                                            "uuid-abc-123": {
+                                              email: "docente@centro.es",
+                                              exp: 173...
+                                            }
+                                          }
+```
+
+- **`ScriptProperties`** guarda el **registro de la sesión en el servidor**: un mapa `token → { email, exp }`. Es la fuente de verdad para resolver la identidad y comprobar la caducidad. Persiste entre ejecuciones y permite una caducidad exacta de 8 horas.
+- **`localStorage`** guarda solo el **identificador opaco** (el UUID) que el navegador envía en cada llamada. No guarda el email como autoridad ni, por supuesto, el PIN. El email de `pnl_pin_email` es solo para prerrellenar el formulario.
+
+¿Por qué hacen falta los dos?
+
+- Sin `ScriptProperties`, el servidor no podría saber a qué email pertenece el token ni revocarlo o caducarlo; el cliente podría inventarse un email y decir “soy administrador”.
+- Sin `localStorage`, el cliente no sabría qué token enviar tras recargar la página o abrir otra pestaña, y habría que reintroducir el PIN en cada carga.
+- El cliente aporta la **credencial**; el servidor resuelve la **identidad y la caducidad**. Es el equivalente a una cookie de sesión en el navegador más una tabla de sesiones en el servidor.
+
+Consecuencias de seguridad:
+
+- El token es un **bearer token**: quien lo posea puede actuar como ese usuario hasta que caduque. De ahí la caducidad de 8 h, el botón **Salir** (borra la entrada de `ScriptProperties` y el `localStorage`) y la necesidad de cuidar el XSS.
+- El PIN **nunca** se guarda en el navegador; solo viaja al servidor en el momento de la validación.
+- El servidor **no confía en el email que venga del cliente**: siempre lo resuelve desde el token. Editar `localStorage` no cambia la identidad.
+- Se usa `ScriptProperties` y no `CacheService` porque este último tiene un máximo de 6 horas; aquí se necesitan 8 (jornada laboral).
+
 ### Limitaciones
 
 - **No elige la cuenta de Google.** El PIN no cambia la sesión del navegador; la app sigue cargando con la cuenta que Google resuelva. Lo que hace es **ignorar esa identidad** para la sesión autenticada por PIN.
