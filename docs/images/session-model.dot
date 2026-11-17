@@ -2,9 +2,9 @@ digraph SessionModel {
   graph [
     rankdir=TB,
     bgcolor="white",
-    pad="0.30",
-    nodesep="0.45",
-    ranksep="0.55",
+    pad="0.40",
+    nodesep="0.50",
+    ranksep="0.85",
     fontname="DejaVu Sans",
     label=<<B>Modelo de sesión: dos almacenes, dos funciones</B><BR/><FONT POINT-SIZE="10">El cliente aporta la credencial; el servidor resuelve la identidad y la caducidad.</FONT>>,
     labelloc="t",
@@ -31,6 +31,8 @@ digraph SessionModel {
 
   subgraph cluster_client {
     label=<<B>Navegador (cliente)</B>>;
+    labelloc="t";
+    labeljust="c";
     fontname="DejaVu Sans";
     fontsize=14;
     color="#cbd5e1";
@@ -42,6 +44,8 @@ digraph SessionModel {
 
   subgraph cluster_server {
     label=<<B>Servidor (Apps Script)</B>>;
+    labelloc="b";
+    labeljust="c";
     fontname="DejaVu Sans";
     fontsize=14;
     color="#cbd5e1";
@@ -51,6 +55,6 @@ digraph SessionModel {
     props [label=<<B>ScriptProperties</B><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="12">PIN_SESSIONS</FONT><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="10">{<BR/>  "uuid-abc-123": {<BR/>    email: "docente@centro.es",<BR/>    exp: 173...<BR/>  }<BR/>}</FONT><BR/><BR/><FONT POINT-SIZE="10" COLOR="#64748b">Fuente de verdad: identidad + caducidad</FONT>>, fillcolor="#dbeafe", color="#3b82f6"];
   }
 
-  local -> props [label="  google.script.run(token)  "];
-  props -> local [label="  email resuelto + exp  ", style=dashed];
+  local:s -> props:n [label="  google.script.run(token)  ", labeljust="l"];
+  props:e -> local:e [label="  email resuelto + exp  ", style=dashed, constraint=false, labeljust="r"];
 }
