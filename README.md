@@ -303,7 +303,7 @@ Registro histórico. Se crea automáticamente si no existe.
 | G | Tipo (tipo de sesión; **vacío en accesos**) |
 | H | Grupo (vacío en accesos) |
 
-- La última modificación de un docente se calcula buscando en la columna D y **ignorando** las filas de acceso (`Acción` de login/logout o `Tipo = ACCESO` en filas antiguas).
+- La última modificación de un docente se calcula buscando en la columna D e **ignorando** las filas de acceso (`Acción` de login/logout o `Tipo = ACCESO` en filas antiguas).
 - La columna G está reservada al tipo de sesión del horario semanal. No escribas `ACCESO` ahí.
 
 ## 🏗️ Arquitectura del código
