@@ -1,5 +1,7 @@
 # Panel de gestión de dedicación no lectiva 📅
 
+![Banner del proyecto](docs/images/banner.png)
+
 Aplicación web desarrollada con **Google Apps Script** y **Google Sheets** para centros educativos. Permite al profesorado planificar y consultar sus franjas horarias no lectivas (guardias, tutorías, gestión) de forma integrada con el horario lectivo, con validación en servidor, control de solapamientos y trazabilidad completa.
 
 El repositorio contiene el **código y las herramientas de desarrollo**; no incluye la hoja de cálculo ni datos reales. La hoja no se comparte porque contiene datos del claustro y configuración específica del centro. Su estructura se documenta aquí para que otro centro pueda recrearla con datos ficticios.
@@ -118,6 +120,11 @@ La pestaña `Acceso PIN` es la única fuente de credenciales:
 
 ### Flujo de autenticación
 
+![Flujo de autenticación](docs/images/auth-flow.png)
+
+<details>
+<summary>Ver el flujo en texto</summary>
+
 ```text
 Flujo normal (una sola cuenta corporativa)
   Google session ──> getInitialData() ──> Session.getActiveUser()
@@ -136,6 +143,8 @@ Flujo con PIN (cuenta equivocada o no autorizada)
                                                                       └─ assertAuthorized() ──> app
 ```
 
+</details>
+
 ### Decisiones de diseño y seguridad
 
 - **Token opaco y servidor-side.** El token es un UUID guardado en `ScriptProperties` (`PIN_SESSIONS`) con `{ email, exp }`. No contiene el email ni el PIN, y no se puede fabricar desde el cliente.
@@ -150,6 +159,11 @@ Flujo con PIN (cuenta equivocada o no autorizada)
 
 El token aparece en dos sitios, pero **no es un secreto duplicado**: son las dos mitades de la misma sesión.
 
+![Modelo de sesión del PIN](docs/images/session-model.png)
+
+<details>
+<summary>Ver el diagrama en texto</summary>
+
 ```text
 Navegador (cliente)                         Servidor (Apps Script)
 localStorage: "uuid-abc-123"  ──RPC──>  ScriptProperties:
@@ -160,6 +174,8 @@ localStorage: "uuid-abc-123"  ──RPC──>  ScriptProperties:
                                             }
                                           }
 ```
+
+</details>
 
 - **`ScriptProperties`** guarda el **registro de la sesión en el servidor**: un mapa `token → { email, exp }`. Es la fuente de verdad para resolver la identidad y comprobar la caducidad. Persiste entre ejecuciones y permite una caducidad exacta de 8 horas.
 - **`localStorage`** guarda solo el **identificador opaco** (el UUID) que el navegador envía en cada llamada. No guarda el email como autoridad ni, por supuesto, el PIN. El email de `pnl_pin_email` es solo para prerrellenar el formulario.
@@ -349,6 +365,7 @@ Registro histórico. Se crea automáticamente si no existe.
 | `scripts/lint.js` | Extrae el JS de `javascript.html` y ejecuta ESLint sobre backend y frontend. |
 | `.clasp.json` | `scriptId` del proyecto de Apps Script y directorio raíz. No contiene credenciales. |
 | `.claspignore` | Lista blanca de archivos que se suben con `clasp push`. |
+| `docs/images/` | Banner y diagramas del README; `banner.svg` y los `.dot` son las fuentes editables. |
 
 ### Endpoints públicos
 

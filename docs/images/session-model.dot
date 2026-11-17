@@ -1,0 +1,56 @@
+digraph SessionModel {
+  graph [
+    rankdir=TB,
+    bgcolor="white",
+    pad="0.30",
+    nodesep="0.45",
+    ranksep="0.55",
+    fontname="DejaVu Sans",
+    label=<<B>Modelo de sesión: dos almacenes, dos funciones</B><BR/><FONT POINT-SIZE="10">El cliente aporta la credencial; el servidor resuelve la identidad y la caducidad.</FONT>>,
+    labelloc="t",
+    fontsize=20
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="DejaVu Sans",
+    fontsize=14,
+    margin="0.18,0.12",
+    penwidth=1.2
+  ];
+
+  edge [
+    color="#64748b",
+    penwidth=1.4,
+    arrowsize=0.8,
+    fontname="DejaVu Sans",
+    fontsize=11,
+    fontcolor="#475569"
+  ];
+
+  subgraph cluster_client {
+    label=<<B>Navegador (cliente)</B>>;
+    fontname="DejaVu Sans";
+    fontsize=14;
+    color="#cbd5e1";
+    style="rounded";
+    bgcolor="#f8fafc";
+
+    local [label=<<B>localStorage</B><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="12">pnl_session_token</FONT><BR/><FONT FACE="DejaVu Sans Mono" COLOR="#7c3aed" POINT-SIZE="14">"uuid-abc-123"</FONT><BR/><BR/><FONT POINT-SIZE="10" COLOR="#64748b">Email solo para prerrellenar el formulario</FONT>>, fillcolor="#ede9fe", color="#a855f7"];
+  }
+
+  subgraph cluster_server {
+    label=<<B>Servidor (Apps Script)</B>>;
+    fontname="DejaVu Sans";
+    fontsize=14;
+    color="#cbd5e1";
+    style="rounded";
+    bgcolor="#f8fafc";
+
+    props [label=<<B>ScriptProperties</B><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="12">PIN_SESSIONS</FONT><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="10">{<BR/>  "uuid-abc-123": {<BR/>    email: "docente@centro.es",<BR/>    exp: 173...<BR/>  }<BR/>}</FONT><BR/><BR/><FONT POINT-SIZE="10" COLOR="#64748b">Fuente de verdad: identidad + caducidad</FONT>>, fillcolor="#dbeafe", color="#3b82f6"];
+  }
+
+  local -> props [label="  google.script.run(token)  "];
+  props -> local [label="  email resuelto + exp  ", style=dashed];
+}
