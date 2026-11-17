@@ -6,7 +6,7 @@ digraph AuthFlow {
     nodesep="0.30",
     ranksep="0.35",
     fontname="DejaVu Sans",
-    label=<<B>Flujo de autenticación</B><BR/><FONT POINT-SIZE="10">Azul: sesión normal · Morado: respaldo con PIN · Rojo: denegado</FONT>>,
+    label=<<B>Flujo de autenticación</B><BR/><BR/><FONT POINT-SIZE="11">Azul: sesión normal · Morado: respaldo con PIN · Rojo: denegado</FONT><BR/><BR/>>,
     labelloc="t",
     fontsize=20
   ];
