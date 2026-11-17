@@ -52,7 +52,7 @@ digraph SessionModel {
     style="rounded";
     bgcolor="#f8fafc";
 
-    props [label=<<B>ScriptProperties</B><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="12">PIN_SESSIONS</FONT><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="10">{<BR/>  "uuid-abc-123": {<BR/>    email: "docente@centro.es",<BR/>    exp: 173...<BR/>  }<BR/>}</FONT><BR/><BR/><FONT POINT-SIZE="10" COLOR="#64748b">Fuente de verdad: identidad + caducidad</FONT>>, fillcolor="#dbeafe", color="#3b82f6"];
+    props [label=<<B>ScriptProperties</B><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="12">PIN_SESSIONS</FONT><BR/><BR/><FONT FACE="DejaVu Sans Mono" POINT-SIZE="10">{<BR ALIGN="LEFT"/>  "uuid-abc-123": {<BR ALIGN="LEFT"/>    email: "docente@centro.es",<BR ALIGN="LEFT"/>    exp: 173...<BR ALIGN="LEFT"/>  }<BR ALIGN="LEFT"/>}</FONT><BR/><BR/><FONT POINT-SIZE="10" COLOR="#64748b">Fuente de verdad: identidad + caducidad</FONT>>, fillcolor="#dbeafe", color="#3b82f6"];
   }
 
   local:s -> props:n [label="  google.script.run(token)  ", labeljust="l"];
