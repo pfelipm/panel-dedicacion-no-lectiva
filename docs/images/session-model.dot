@@ -6,7 +6,7 @@ digraph SessionModel {
     nodesep="0.50",
     ranksep="0.85",
     fontname="DejaVu Sans",
-    label=<<B>Modelo de sesión: dos almacenes, dos funciones</B><BR/><BR/><FONT POINT-SIZE="11">El cliente aporta la credencial; el servidor resuelve la identidad y la caducidad.</FONT><BR/><BR/>>,
+    label=<<FONT POINT-SIZE="11">El cliente aporta la credencial; el servidor resuelve la identidad y la caducidad.</FONT><BR/><BR/>>,
     labelloc="t",
     fontsize=20
   ];
