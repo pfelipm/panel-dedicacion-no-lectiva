@@ -223,7 +223,7 @@ Consecuencias de seguridad:
 - Muestra las tarjetas de estadísticas de cada docente con validación pendiente.
 - Acceso directo desde el informe al horario del docente para agilizar las correcciones.
 
-### 4. Solapamientos excepcionales (solo administración) ⚠️
+### 4. Solapamientos excepcionales (solo administración) 🚨
 
 - Permite a los administradores registrar sesiones no lectivas sobre franjas lectivas en periodos especiales (FCT, prácticas en empresa).
 - Visualización mediante **pastillas divididas** que muestran ambas actividades simultáneamente.
@@ -241,7 +241,7 @@ Consecuencias de seguridad:
 - Auditoría automática de cada cambio en el backend.
 - Auditoría específica de los accesos con PIN.
 
-## 🗂️ Estructura de la hoja de cálculo
+## 📊 Estructura de la hoja de cálculo
 
 > **La hoja de cálculo no se incluye en el repositorio.** Contiene datos reales del profesorado y configuración específica del centro. Esta sección documenta su estructura para que otro centro pueda recrearla con datos ficticios. Si reutilizas el proyecto, respeta la normativa de protección de datos y no publiques la hoja.
 
@@ -353,7 +353,7 @@ Registro histórico. Se crea automáticamente si no existe.
 - La última modificación de un docente se calcula buscando en la columna D e **ignorando** las filas de acceso (`Acción` de login/logout o `Tipo = ACCESO` en filas antiguas).
 - La columna G está reservada al tipo de sesión del horario semanal. No escribas `ACCESO` ahí.
 
-## 🏗️ Arquitectura del código
+## 📐 Arquitectura del código
 
 | Archivo | Responsabilidad |
 |---|---|
@@ -462,7 +462,7 @@ La UI muestra la última modificación real de cada docente. Para calcularla se 
   6. Pulsar **Salir**: el token se revoca y vuelve el overlay de acceso.
   7. Entrar con un docente normal: debe ver su horario y no pedir PIN.
 
-## 🛠️ Solución de problemas
+## 🔧 Solución de problemas
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
@@ -489,7 +489,7 @@ La UI muestra la última modificación real de cada docente. Para calcularla se 
 - [clasp](https://github.com/google/clasp)
 - [Google Identity Services](https://developers.google.com/identity/gsi/web) — evolución recomendada si se necesita SSO.
 
-## ✒️ Autor
+## 👤 Autor
 
 **Pablo Felip Monferrer**
 
